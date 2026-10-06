@@ -4,7 +4,8 @@ Read this first, then `CLAUDE.md`, then the relevant part of `docs/research.md`.
 
 ## State
 
-- Pipeline on `master` (the default branch) and on `claude/serene-euler-g5spyi`.
+- Code lives on `main`. Changes go through `feature/<name>` or `hotfix/<name>` branches and PRs.
+  The autopilot always runs `main`. `claude/serene-euler-g5spyi` is the old bootstrap branch.
 - 31 unit tests pass. `make smoke` prints READY on CPU (tiny Qwen3-VL, synthetic videos): frames,
   LoRA steps, dev scoring, test prediction with 2-shift TTA, validated zip.
 - A zip for the real 4,000 test ids passes `reva.package.validate`.
@@ -29,8 +30,9 @@ These are the first things the first job will tell us. Check its log before trus
 - Still unknown from here: whether the Codabench account has joined the competition. If not,
   STATUS.md shows "Codabench refuses submissions for this account" and the runs wait in runs.jsonl
   until it has; the loop then submits them on the next cycle.
-- Git pushes from the agent's sandbox are refused (Claude GitHub App not installed on this repo).
-  Code reaches GitHub through the GitHub API instead.
+- GitHub made `claude/serene-euler-g5spyi` the default branch (first push to an empty repo).
+  The owner should switch the default to `main` in Settings > General. Until then the hourly
+  schedule fires from that branch, but the job checks out and runs `main` anyway.
 
 ## Next steps, in order
 

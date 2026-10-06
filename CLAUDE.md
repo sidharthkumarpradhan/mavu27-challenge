@@ -27,12 +27,25 @@ Engineering:
 - Model selection for agent work: a lower tier model (preferably Haiku 4.5) for research and
   token-heavy tasks; a higher tier model for system design that needs more judgment. This gets the
   best work for the fewest tokens. Always do thorough analysis before proceeding.
+- Dig deep into the best practices of the tech stack before any code change.
 - No AI author on any commit. Commit as the owner:
   `git -c user.name="Sidharth Pradhan" -c user.email="sidharthp@assignall.ai" commit ...`.
   No `Co-Authored-By` or other AI trailers. GitHub account: `sidharthkumarpradhan`.
-- One feature per branch. Never `git add -A`. Secrets never enter the repo.
-- Every module has tests. Every bug gets a regression test. `make test` passes before a merge.
+- No AI footprint anywhere: simple, modular code that follows the stack's conventions, comments
+  written the way a careful engineer writes them, PR titles and summaries that read as the
+  owner's own. No "Generated with" lines in PRs, commits or code.
+- Branches: always start from the latest `main` (`git fetch origin main`, branch from
+  `origin/main`). Name it `feature/<name>` for new work or `hotfix/<name>` for a fix. One change
+  per branch. Merge into `main` through a PR.
+- Before raising a PR: run the unit tests (`make test`) and run the app locally end to end
+  (`make smoke` here; for apps with a UI, drive the screen and check every change by hand).
+  Nothing goes up untested.
+- If stuck, ask the owner. Do not guess around a blocker.
+- Never `git add -A`. Secrets never enter the repo.
+- Every module has tests. Every bug gets a regression test.
 - Fail loudly. Long jobs end with a sentinel line (`DONE` or `EXIT <code>`).
+
+These engineering and branch rules apply to every project, not only this one.
 
 Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - The owner decides. The agent prepares. Irreversible or outward-facing steps need the owner's OK,

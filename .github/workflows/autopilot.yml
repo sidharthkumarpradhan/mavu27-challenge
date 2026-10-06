@@ -9,14 +9,14 @@
 # Secrets: KAGGLE_USERNAME, KAGGLE_KEY (GPU jobs), CODABENCH_USERNAME, CODABENCH_PASSWORD
 # (submissions and scores). Optional: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN turns on the
 # headless Claude Code fixer for failed jobs, as in the EURS loop.
-# Scheduled runs use the default branch only.
+# Scheduled runs fire from the default branch; the job always checks out main.
 name: autopilot
 
 on:
   schedule:
     - cron: "23 * * * *"
-  push:  # a code, config or queue change starts a cycle at once instead of at the next hour
-    branches-ignore: [state]
+  push:  # a merged code, config or queue change starts a cycle at once instead of at the next hour
+    branches: [main]
     paths: ["configs/**", "src/**", ".github/workflows/autopilot.yml"]
   workflow_dispatch:
 
@@ -45,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main  # only merged code drives GPU jobs and submissions, whichever branch fired
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -85,7 +86,7 @@ jobs:
       - name: Cycle
         run: |
           nopush=""; [ "${{ steps.tests.outcome }}" = "success" ] || nopush="--no-push"
-          python -m reva.cli autopilot --state state --work work/autopilot --sha "$GITHUB_SHA" --outcome outcome.json $nopush
+          python -m reva.cli autopilot --state state --work work/autopilot --sha "$(git rev-parse HEAD)" --outcome outcome.json $nopush
           cat state/STATUS.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save state
