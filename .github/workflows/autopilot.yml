@@ -15,6 +15,9 @@ name: autopilot
 on:
   schedule:
     - cron: "23 * * * *"
+  push:  # a code, config or queue change starts a cycle at once instead of at the next hour
+    branches-ignore: [state]
+    paths: ["configs/**", "src/**", ".github/workflows/autopilot.yml"]
   workflow_dispatch:
 
 concurrency:

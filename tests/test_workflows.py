@@ -19,3 +19,9 @@ def test_workflows_parse_and_have_steps():
 def test_autopilot_is_on_by_default():
     d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
     assert d["jobs"]["cycle"]["if"] == "vars.AUTOPILOT != 'off'"
+
+
+def test_autopilot_starts_on_queue_pushes_but_not_on_state():
+    d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
+    on = d[True]  # PyYAML reads the key `on` as True
+    assert "configs/**" in on["push"]["paths"] and on["push"]["branches-ignore"] == ["state"]
