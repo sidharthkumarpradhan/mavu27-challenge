@@ -74,4 +74,4 @@ remote:
   max_hours: 11.5             # Kaggle sessions stop at 12 h
   weekly_gpu_hours: 30        # Kaggle's documented weekly GPU quota
   repo: https://github.com/sidharthkumarpradhan/mavu27-challenge
-  pip: ["transformers==5.19.0", "peft==0.21.2", "av==19.0.1", "bitsandbytes>=0.45", "accelerate>=1.0"]
+  pip: ["transformers==5.19.0", "peft==0.21.2", "av>=14", "bitsandbytes>=0.45", "accelerate>=1.0"]

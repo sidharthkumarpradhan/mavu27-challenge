@@ -4,7 +4,7 @@ PY ?= python3
 
 install:
 	$(PY) -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-	$(PY) -m pip install -e ".[dev,remote]" "transformers==5.19.0" "peft==0.21.2" "av==19.0.1" accelerate pillow huggingface_hub
+	$(PY) -m pip install -e ".[dev,remote]" "transformers==5.19.0" "peft==0.21.2" "av>=14" accelerate pillow huggingface_hub
 
 test:
 	$(PY) -m pytest -q
