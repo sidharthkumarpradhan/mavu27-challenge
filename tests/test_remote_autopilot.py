@@ -224,3 +224,9 @@ def test_cycle_falls_back_to_the_next_format_and_reports_refusals(tmp_path):
                           now=NOW + dt.timedelta(hours=3), fetch_board=board_rows, push=False)
     assert out["submitted"][0]["format"] == "id_map" and out["submitted"][0]["status"] == "Finished"
     assert package.validate(ok.submitted[0], TEST, "id_map") == len(TEST)
+
+
+def test_caller_notes_reach_status(tmp_path):
+    autopilot.cycle(cfg(), QUEUE, tmp_path / "s", tmp_path / "w", FakeKaggle(), "sha", "me", now=NOW,
+                    fetch_board=board_rows, notes=["Codabench login ok"])
+    assert "- Codabench login ok" in (tmp_path / "s" / "STATUS.md").read_text()

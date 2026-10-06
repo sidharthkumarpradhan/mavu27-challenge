@@ -180,12 +180,12 @@ def status_md(cfg: dict, rows: list[dict], runs: list[dict], subs: list[dict], a
 
 def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_user: str,
           client=None, auto_submit: bool = False, now: dt.datetime | None = None,
-          fetch_board=None, push: bool = True) -> dict:
+          fetch_board=None, push: bool = True, notes: list[str] | None = None) -> dict:
     """One step. `client` is a logged-in reva.codabench.Client or None (then nothing is submitted)."""
     now = now or dt.datetime.now(dt.timezone.utc)
     state.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
-    notes: list[str] = []
+    notes = list(notes or [])  # e.g. the Codabench login result from the caller
     out = {"collected": [], "submitted": [], "pushed": None, "needs_fix": False}
 
     # 1. leaderboard
