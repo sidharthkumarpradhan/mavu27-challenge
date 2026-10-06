@@ -6,7 +6,9 @@ Mirrors the official web client (codalab/codabench, develop branch, read 6 Oct 2
   file_size} -> {"key", "sassy_url"} (src/apps/api/views/datasets.py, DataViewSet.create).
 - PUT <sassy_url> with the zip bytes, Content-Type application/zip (static/js/ours/client.js).
 - PUT /api/datasets/completed/<key>/ marks the upload done.
-- POST /api/submissions/ {data: key, phase, tasks: [task ids]} (submission_upload.tag).
+- POST /api/submissions/ {data: key, phase, tasks: [task ids], organization} (submission_upload.tag).
+  `organization` is the id behind the page's "Submit as" box; leaving it out submits as yourself.
+- GET /api/users/participant_organizations/ -> [{id, name, url}] for that box (views/profiles.py).
 - GET /api/submissions/<id>/ -> status in Submitting, Submitted, Preparing, Running, Scoring,
   Finished, Failed, Cancelled, plus "scores" when finished (competitions/models.py).
 Limits come from Phase.can_user_make_submissions: per-day and per-person totals; Failed
@@ -55,9 +57,19 @@ class Client:
         d = self._ok(self.s.get(f"{self.base}/api/can_make_submission/{phase}/", timeout=60), "can_make_submission")
         return bool(d.get("can")), d.get("reason") or ""
 
-    def submit(self, zip_path: str | Path, competition: int, phase: int, tasks: list[int]) -> int:
-        """Upload and start one submission. The zip's file name shows up on Codabench, so name it
-        after the run id. Returns the submission id."""
+    def organization_id(self, name: str) -> int:
+        """Id of the organization this account submits for. Raises if the account is not in it, so
+        a run never goes up under the wrong name."""
+        orgs = self._ok(self.s.get(f"{self.base}/api/users/participant_organizations/", timeout=60), "organizations")
+        match = [o for o in orgs if o.get("name") == name]
+        if len(match) != 1:
+            raise CodabenchError(f"organization {name!r} not found for this account; have {[o.get('name') for o in orgs]}")
+        return int(match[0]["id"])
+
+    def submit(self, zip_path: str | Path, competition: int, phase: int, tasks: list[int],
+               organization: int | None = None) -> int:
+        """Upload and start one submission, as `organization` when given. The zip's file name shows
+        up on Codabench, so name it after the run id. Returns the submission id."""
         zip_path = Path(zip_path)
         meta = {"type": "submission", "competition": competition, "request_sassy_file_name": zip_path.name,
                 "file_name": zip_path.name, "file_size": zip_path.stat().st_size}
@@ -67,9 +79,10 @@ class Client:
         if up.status_code >= 300:
             raise CodabenchError(f"zip upload failed ({up.status_code}): {up.text[:300]}")
         self._ok(self.s.put(f"{self.base}/api/datasets/completed/{ds['key']}/", timeout=60), "upload completed")
-        sub = self._ok(self.s.post(f"{self.base}/api/submissions/",
-                                   json={"data": ds["key"], "phase": phase, "tasks": tasks}, timeout=60),
-                       "submission create")
+        body = {"data": ds["key"], "phase": phase, "tasks": tasks}
+        if organization is not None:
+            body["organization"] = organization
+        sub = self._ok(self.s.post(f"{self.base}/api/submissions/", json=body, timeout=60), "submission create")
         return int(sub["id"])
 
     def submission(self, sid: int) -> dict:

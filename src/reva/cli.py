@@ -79,6 +79,11 @@ def cmd_autopilot(a) -> int:
             login += "; account may submit" if can else f"; Codabench refuses submissions: {why}"
     except Exception as e:  # a bad login must not stop the GPU side of the loop
         client, login = None, f"Codabench login failed: {e}"
+    if client and (org := C.get(cfg, "competition.organization")):
+        try:
+            login += f"; submits as {org} (id {client.organization_id(org)})"
+        except Exception as e:  # shown every hour; the submit step refuses on its own
+            login += f"; {e}"
     out = autopilot.cycle(cfg, remote.load_queue(a.queue), Path(a.state), Path(a.work), Kaggle(), a.sha, a.user,
                           client=client, auto_submit=auto, push=not a.no_push, notes=[login])
     print("\n".join(out["notes"]))
@@ -92,7 +97,7 @@ def cmd_submit(a) -> int:
     validate it, submit, wait, record. Skips the dev-gain gate (the owner decided), never the
     format and budget checks."""
     from reva import data, package, registry
-    from reva.autopilot import iso, latest_submissions
+    from reva.autopilot import iso, latest_submissions, submit_as
     from reva.codabench import scores
     from reva.kaggle import Kaggle
 
@@ -117,7 +122,7 @@ def cmd_submit(a) -> int:
         print("set CODABENCH_USERNAME and CODABENCH_PASSWORD")
         return 1
     sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
-                        [C.get(cfg, "competition.task")])
+                        [C.get(cfg, "competition.task")], organization=submit_as(client, cfg))
     rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
     registry.append(state / "submissions.jsonl", {
         "run_id": run["run_id"], "kernel": run["kernel"], "submission_id": sid,

@@ -178,6 +178,12 @@ def status_md(cfg: dict, rows: list[dict], runs: list[dict], subs: list[dict], a
     return "\n".join(lines) + "\n"
 
 
+def submit_as(client, cfg: dict) -> int | None:
+    """Codabench organization id for `competition.organization`, or None to submit as the account."""
+    name = C.get(cfg, "competition.organization")
+    return client.organization_id(name) if name else None
+
+
 def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_user: str,
           client=None, auto_submit: bool = False, now: dt.datetime | None = None,
           fetch_board=None, push: bool = True, notes: list[str] | None = None) -> dict:
@@ -251,11 +257,13 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                     raise CodabenchError(f"Codabench refuses submissions for this account: {reason}")
                 fmt = pick_format(subs, cfg)
                 zip_path = submission_zip(kaggle, r, fmt, cfg, work)
+                org = submit_as(client, cfg)
                 sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
-                                    [C.get(cfg, "competition.task")])
+                                    [C.get(cfg, "competition.task")], organization=org)
                 rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
                 row = {"run_id": r["run_id"], "kernel": r["kernel"], "submission_id": sid, "submitted": iso(now),
                        "status": rec.get("status"), "scores": scores(rec), "format": fmt,
+                       "organization": C.get(cfg, "competition.organization"),
                        "dev_weighted": r["metrics"]["weighted_accuracy"], "dev_overall": r["metrics"]["overall_accuracy"]}
                 registry.append(state / "submissions.jsonl", row)
                 out["submitted"].append(row)
