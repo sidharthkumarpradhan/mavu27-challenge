@@ -57,6 +57,19 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 
 ## Compliance rules for ReVA (decided before any score)
 
+Owner's rules (6 Oct 2026): always follow the competition guidelines, because we will publish a
+paper on this work. The official dataset (Hugging Face `ReVA-Benchmark/ReVA`) and the Codabench
+competition 18274 pages are the source of truth. When anything goes wrong, check the dataset and
+every Codabench section (Overview, Data, Terms, phase settings, leaderboard, forum) before trusting
+our own notes. Leave no stone unturned.
+
+From the Codabench pages (read in full 6 Oct 2026):
+- Predictions must come from the video together with the question and the options (Data page).
+  A text-only or option-only model is a probe for our own analysis. It never goes to the test set.
+- Academic, non-commercial use only. The data may be used for this challenge and related research.
+- Never redistribute or publicly release the dataset or its annotations (Terms). The public repo
+  holds code, configs and metrics only. Kaggle kernels stay private.
+- Cite the ReVA paper (arXiv 2609.35507) in the workshop paper and any report.
 - Use only official data and pretrained public weights. Disclose every pretrained model.
 - Never tune on leaderboard feedback per question. Codabench shows per-task accuracy and allows
   100 submissions a day. Using that to infer test labels is label probing. We do not do it. A
