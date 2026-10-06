@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reva"
+version = "0.1.0"
+description = "End-to-end pipeline for the ReVA drone video QA challenge (MAVU, WACV 2027)"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6", "requests>=2.31", "numpy>=1.26"]
+
+[project.optional-dependencies]
+# GPU job side. Pinned in the job script too, so a Kaggle image change cannot drift it silently.
+gpu = ["torch>=2.4", "transformers>=4.57", "accelerate>=1.0", "peft>=0.13", "bitsandbytes>=0.44",
+       "av>=12", "pillow>=10", "huggingface_hub>=0.25"]
+remote = ["kaggle==2.2.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+reva = "reva.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

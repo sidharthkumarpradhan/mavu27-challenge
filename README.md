@@ -1,0 +1,64 @@
+# ReVA challenge pipeline (MAVU @ WACV 2027)
+
+An end-to-end, unattended pipeline for the
+[ReVA Drone Video Understanding Challenge](https://www.codabench.org/competitions/18274/):
+4-option multiple-choice questions about drone videos, scored by accuracy on 4,000 hidden answers.
+Challenge deadline Nov 10, 2026.
+
+It follows the playbook that took rank 1 at MaCVi 2027 EURS
+(`sidharthkumarpradhan/macvi27-challenge`, `docs/WORKFLOW.md`): measure first, a local scorer that
+mirrors the board, compliance gates before any upload, and an hourly loop that needs no laptop.
+
+```
+live leaderboard -> per-task gap ----------------------------------------------+
+configs/queue.yaml -> Kaggle job (2 lanes, one per T4) -> dev score + test zip -> gate -> Codabench
+                                                     \-> runs.jsonl, STATUS.md on the `state` branch
+```
+
+## Modules (`src/reva`)
+
+| module | job |
+|---|---|
+| `data` | annotations, schema checks, the dev split (val plus a stratified train holdout) |
+| `score` | Codabench's 12 columns locally, plus accuracy re-weighted to the test mix |
+| `package` | writes `submission.zip` and checks every rule on the Data page |
+| `frames` | decodes each video once into uniformly sampled frames with true timestamps |
+| `model` | Qwen3-VL prompt, A-D letter scoring in one pass, option-shift TTA, LoRA training |
+| `job` | one experiment start to finish on one GPU |
+| `remote`, `kaggle` | queue entries to a Kaggle kernel; the Kaggle CLI wrapper |
+| `board`, `codabench` | public leaderboard; login, upload, submit, poll |
+| `autopilot` | one hourly cycle: board, collect, gated submit, push next, STATUS.md |
+| `smoke` | the whole GPU job on CPU with a tiny model and synthetic videos |
+
+## Use
+
+```bash
+make install        # package + CPU torch + test deps
+make test           # unit tests (no GPU)
+make smoke          # full job on CPU, prints READY
+python -m reva.cli board                     # live leaderboard
+python -m reva.cli build --sha <commit>      # the Kaggle kernel for the next queued lanes (pushes nothing)
+python -m reva.cli job --config-json run.json --out out/   # one experiment on a local GPU
+python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission
+```
+
+## Automation
+
+`.github/workflows/autopilot.yml` runs every hour on the default branch:
+
+1. Snapshot the leaderboard.
+2. Poll open submissions.
+3. Collect a finished Kaggle job: dev metrics into `runs.jsonl`, the zip kept in the kernel's
+   private output.
+4. Submit the best new run if `reva.autopilot.gate` allows it and `AUTO_SUBMIT` is `on`.
+5. Push the next pending queue entries as a new kernel, within the weekly GPU quota.
+6. Write `STATUS.md` (board, our gap per task, calibration, runs, budgets) on the `state` branch.
+
+Repo settings it needs: variables `AUTOPILOT=on` and, when the owner decides, `AUTO_SUBMIT=on`;
+secrets `KAGGLE_USERNAME`, `KAGGLE_KEY`, `CODABENCH_USERNAME`, `CODABENCH_PASSWORD`.
+
+The repo is public. Test predictions never enter it: they stay in private Kaggle outputs and
+go straight to Codabench.
+
+To add an experiment, append an entry to `configs/queue.yaml`. See `CLAUDE.md` for the rules
+every change follows and `docs/HANDOFF.md` for the current state.

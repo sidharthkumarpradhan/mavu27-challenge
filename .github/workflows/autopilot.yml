@@ -1,0 +1,111 @@
+# Unattended ReVA loop. Every hour: leaderboard snapshot, poll open submissions, collect a finished
+# Kaggle job, submit the best gated run, push the next queued lanes, update STATUS.md on the
+# `state` branch. See src/reva/autopilot.py.
+#
+# Switches (Settings > Secrets and variables > Actions):
+#   variable AUTOPILOT=on        runs the loop at all
+#   variable AUTO_SUBMIT=on      allows automatic Codabench submissions (default off)
+#   secrets KAGGLE_USERNAME, KAGGLE_KEY                 GPU jobs
+#   secrets CODABENCH_USERNAME, CODABENCH_PASSWORD      submissions and their scores
+# Scheduled runs use the default branch only.
+name: autopilot
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: autopilot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  cycle:
+    if: vars.AUTOPILOT == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      CODABENCH_USERNAME: ${{ secrets.CODABENCH_USERNAME }}
+      CODABENCH_PASSWORD: ${{ secrets.CODABENCH_PASSWORD }}
+      AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (no torch: the cycle only orchestrates)
+        run: python -m pip install -q -e ".[remote,dev]"
+
+      - name: Kaggle credentials
+        run: |
+          test -n "$KAGGLE_USERNAME" && test -n "$KAGGLE_KEY" || { echo "KAGGLE_USERNAME/KAGGLE_KEY not set"; exit 1; }
+          mkdir -p ~/.kaggle
+          key=$(printf %s "$KAGGLE_KEY" | tr -d '[:space:]')
+          # the key may be the classic 32-char key or a new "KGAT..." token (seen in the EURS loop)
+          if [[ $key == KGAT* ]]; then
+            printf %s "$key" > ~/.kaggle/access_token; chmod 600 ~/.kaggle/access_token
+            echo "KAGGLE_API_TOKEN=$key" >> "$GITHUB_ENV"
+          else
+            python -c "import json,os,sys; json.dump({'username': os.environ['KAGGLE_USERNAME'].strip(), 'key': sys.argv[1]}, open(os.path.expanduser('~/.kaggle/kaggle.json'), 'w'))" "$key"
+            chmod 600 ~/.kaggle/kaggle.json
+          fi
+
+      - name: Tests (a red suite collects and reports, but pushes no new GPU job)
+        id: tests
+        continue-on-error: true
+        run: python -m pytest -q
+
+      - name: State branch
+        run: |
+          if git ls-remote --exit-code --heads origin state >/dev/null; then
+            git fetch -q origin state
+            git worktree add -B state state origin/state
+          else
+            git worktree add --orphan -b state state
+          fi
+
+      - name: Cycle
+        run: |
+          nopush=""; [ "${{ steps.tests.outcome }}" = "success" ] || nopush="--no-push"
+          python -m reva.cli autopilot --state state --work work/autopilot --sha "$GITHUB_SHA" --outcome outcome.json $nopush
+          cat state/STATUS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save state
+        if: always()
+        run: |
+          cd state
+          [ -f STATUS.md ] || exit 0
+          git config user.name "Sidharth Pradhan"
+          git config user.email "sidharthp@assignall.ai"
+          for f in STATUS.md board.csv runs.jsonl jobs.jsonl submissions.jsonl active.json; do
+            [ -f "$f" ] && git add -- "$f"
+          done
+          git add -u -- .
+          git diff --cached --quiet && exit 0
+          git commit -q -m "autopilot: state at $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q origin state
+
+      - name: Issue on a failed job
+        if: always()
+        run: |
+          [ -f outcome.json ] || exit 0
+          python - <<'PY'
+          import json, subprocess
+          out = json.load(open("outcome.json"))
+          if not out.get("needs_fix"):
+              raise SystemExit(0)
+          runs = ", ".join(out["collected"])
+          body = "Failed lanes in the last job: " + runs + "\n\nLog tail:\n```\n" + out.get("log_tail", "")[-6000:] + "\n```"
+          subprocess.run(["gh", "issue", "create", "--title", f"Autopilot job failed: {runs}", "--body", body], check=True)
+          PY

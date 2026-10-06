@@ -1,0 +1,74 @@
+# Competition facts and pipeline defaults. Every experiment is these defaults plus the overrides in
+# configs/queue.yaml. Sources for each fact: docs/research.md.
+
+competition:
+  name: "ReVA: Drone Video Understanding Challenge (MAVU @ WACV 2027)"
+  base: https://www.codabench.org
+  id: 18274
+  phase: 30831
+  task: 36510                 # the phase's only task, "ReVA VideoQA"
+  deadline: "2026-11-10"      # 11:59 PM PST, workshop site
+  owner: ""                   # our Codabench username, for rank lookups (set once known)
+
+data:
+  hf_repo: ReVA-Benchmark/ReVA
+  root: data/reva             # annotations: train.json, val.json, test.json
+  video_root: data/reva       # videos keep their relative video_path under this root
+
+dev:
+  holdout_frac: 0.08          # question-level train holdout per (source, task); adds ERA to dev
+  seed: 0
+  min_cell: 20                # weighted_accuracy falls back to task level below this many dev rows
+
+frames:
+  n: 16
+  max_side: 640               # the ReVA paper uses 32 frames at 640x360
+  cache: work/frames
+  workers: 4
+
+model:
+  id: Qwen/Qwen3-VL-4B-Instruct
+  dtype: fp16                 # T4 and V100 have no bf16
+  load_4bit: false
+  use_video: true
+  timestamps_in_text: false   # Qwen3-VL already gets real timestamps from the frame metadata
+  processor_kwargs:
+    cap_pixels_per_frame: true  # transformers 5.19 warns this becomes the default in 5.22
+
+train:
+  enabled: false
+  epochs: 1
+  max_samples: null
+  lr: 2.0e-4                  # paper: AdamW 2e-4, cosine, warmup 0.03, LoRA r16 a32 (Appendix B)
+  warmup: 0.03
+  grad_accum: 8
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  shuffle_options: true
+  max_hours: 8.0              # training stops here and the run still scores dev and test
+  save_every: 200
+  refit: false                # final fit: holdout goes back into training
+  refit_with_val: false       # owner's call, see CLAUDE.md compliance rules
+  init_adapter: null          # continue from a previous run's adapter directory
+
+infer:
+  perms: 1                    # option-order TTA shifts (1 = off, 4 = all cyclic shifts)
+  skip_test: false
+
+submit:
+  format: fill_test           # see reva.package; the first real submission confirms it
+  min_gain: 0.003             # weighted dev accuracy must beat the best submitted run by this
+  total_budget: 100           # Codabench max_submissions_per_person (Failed ones do not count)
+  reserve: 15                 # kept for the final week
+  max_per_day: 4              # our own pacing, well under Codabench's 100 a day
+  wait_minutes: 20
+
+remote:
+  kernel: sidharthkumarpradhan/reva-job
+  accelerator: NvidiaTeslaT4  # Kaggle "GPU T4 x2": one lane per GPU
+  lanes: 2
+  max_hours: 11.5             # Kaggle sessions stop at 12 h
+  weekly_gpu_hours: 30        # Kaggle's documented weekly GPU quota
+  repo: https://github.com/sidharthkumarpradhan/mavu27-challenge
+  pip: ["transformers==5.19.0", "peft==0.21.2", "av==19.0.1", "bitsandbytes>=0.45", "accelerate>=1.0"]

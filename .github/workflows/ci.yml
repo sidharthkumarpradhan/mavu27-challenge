@@ -1,0 +1,24 @@
+name: ci
+on:
+  push:
+    branches-ignore: [state]  # the autopilot's data branch has no code
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (CPU torch)
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q -e ".[dev,remote]" "transformers==5.19.0" "peft==0.21.2" "av==19.0.1" accelerate pillow huggingface_hub
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: Smoke (whole GPU job on CPU, tiny model, synthetic videos)
+        run: python -m reva.cli smoke --out work/smoke
