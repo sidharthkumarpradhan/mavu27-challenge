@@ -111,7 +111,7 @@ def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> Path:
     data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
     preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
     return package.write(work / "submit" / f"{run['run_id']}.zip", data.load_split(ann, "test"), preds, fmt,
-                         {"run_id": run["run_id"]})
+                         data.load_metadata(ann, "test"))
 
 
 def summarize_config(cfg: dict) -> dict:

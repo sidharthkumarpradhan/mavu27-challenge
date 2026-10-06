@@ -127,7 +127,7 @@ def run(cfg: dict, out: Path, device: str) -> dict:
         (out / "test_probs.json").write_text(json.dumps(test_probs))
         if len(test_probs) == 4000 or C.get(cfg, "limit.test"):
             zip_path = out / f"{run_id}.zip"
-            meta = {"run_id": run_id}
+            meta = data.load_metadata(ann, "test")
             if C.get(cfg, "limit.test"):  # a smoke run checks the zip against the rows it predicted
                 package.write(zip_path, sp["test"], argmax(test_probs), C.get(cfg, "submit.format"), meta)
             else:

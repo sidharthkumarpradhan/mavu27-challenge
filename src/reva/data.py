@@ -40,6 +40,12 @@ def fetch_annotations(root: str | Path, repo: str) -> list[Path]:
     return out
 
 
+def load_metadata(root: str | Path, split: str) -> dict:
+    """The split file's "metadata" block. A fill_test submission keeps test.json's own, so the
+    file we upload has the same layout as the hidden answer key (see reva.package)."""
+    return json.loads((Path(root) / f"{split}.json").read_text(encoding="utf-8")).get("metadata", {})
+
+
 def load_split(root: str | Path, split: str) -> list[dict]:
     rows = json.loads((Path(root) / f"{split}.json").read_text(encoding="utf-8"))["QA"]
     check_rows(rows, labeled=split != "test")
