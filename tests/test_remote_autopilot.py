@@ -85,7 +85,7 @@ def test_gate_rules():
 
 
 TEST = make_rows("test", 1)
-TEST_META = {"generated_at": "2026-04-25", "total_questions": 4}
+TEST_META = {"generated_at": "2026-04-25", "total_questions": len(TEST)}
 
 
 def seed_annotations(work: Path) -> None:
