@@ -21,7 +21,15 @@ def test_autopilot_is_on_by_default():
     assert d["jobs"]["cycle"]["if"] == "vars.AUTOPILOT != 'off'"
 
 
-def test_autopilot_starts_on_queue_pushes_but_not_on_state():
+def test_autopilot_starts_on_merged_queue_pushes():
     d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
     on = d[True]  # PyYAML reads the key `on` as True
-    assert "configs/**" in on["push"]["paths"] and on["push"]["branches-ignore"] == ["state"]
+    assert "configs/**" in on["push"]["paths"] and on["push"]["branches"] == ["main"]
+
+
+def test_autopilot_runs_only_main():
+    text = (ROOT / ".github" / "workflows" / "autopilot.yml").read_text()
+    d = yaml.safe_load(text)
+    checkout = d["jobs"]["cycle"]["steps"][0]
+    assert checkout["uses"].startswith("actions/checkout") and checkout["with"]["ref"] == "main"
+    assert "GITHUB_SHA" not in text  # the commit sent to Kaggle is main's HEAD, not the trigger's
