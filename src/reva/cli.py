@@ -82,8 +82,8 @@ def cmd_autopilot(a) -> int:
     if client and (org := C.get(cfg, "competition.organization")):
         try:
             login += f"; submits as {org} (id {client.organization_id(org)})"
-        except Exception as e:  # shown every hour; the submit step refuses on its own
-            login += f"; {e}"
+        except Exception:  # a fixed note: error text may hold response bodies, and STATUS.md is public
+            login += f"; could not confirm organization {org}, so nothing will be submitted"
     out = autopilot.cycle(cfg, remote.load_queue(a.queue), Path(a.state), Path(a.work), Kaggle(), a.sha, a.user,
                           client=client, auto_submit=auto, push=not a.no_push, notes=[login])
     print("\n".join(out["notes"]))
