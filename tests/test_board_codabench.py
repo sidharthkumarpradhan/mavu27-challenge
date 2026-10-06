@@ -97,5 +97,6 @@ def test_submit_as_organization(tmp_path, monkeypatch):
     assert c.organization_id("StagAI") == 5
     c.submit(z, 18274, 30831, [36510], organization=5)
     assert s.calls[-1][2] == {"data": "k1", "phase": 30831, "tasks": [36510], "organization": 5}
-    with pytest.raises(codabench.CodabenchError, match="not found"):
+    with pytest.raises(codabench.CodabenchError, match="not found") as err:
         c.organization_id("stagai")  # exact name only: never guess which team gets the score
+    assert "Other" not in str(err.value)  # other memberships stay out of the public status page

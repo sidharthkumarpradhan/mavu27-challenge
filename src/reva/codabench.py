@@ -63,7 +63,8 @@ class Client:
         orgs = self._ok(self.s.get(f"{self.base}/api/users/participant_organizations/", timeout=60), "organizations")
         match = [o for o in orgs if o.get("name") == name]
         if len(match) != 1:
-            raise CodabenchError(f"organization {name!r} not found for this account; have {[o.get('name') for o in orgs]}")
+            # name only the one we asked for: this message lands in the public STATUS.md
+            raise CodabenchError(f"organization {name!r} not found for this account")
         return int(match[0]["id"])
 
     def submit(self, zip_path: str | Path, competition: int, phase: int, tasks: list[int],
