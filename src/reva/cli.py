@@ -70,10 +70,15 @@ def cmd_autopilot(a) -> int:
     from reva.kaggle import Kaggle
 
     cfg = _cfg(a)
-    auto = os.environ.get("AUTO_SUBMIT", "").lower() == "on"
-    client = _client(cfg)
+    auto = os.environ.get("AUTO_SUBMIT", "on").lower() != "off"  # on unless the owner sets it off
+    try:
+        client = _client(cfg)
+        login = "Codabench login ok" if client else "Codabench secrets not set"
+    except Exception as e:  # a bad login must not stop the GPU side of the loop
+        client, login = None, f"Codabench login failed: {e}"
     out = autopilot.cycle(cfg, remote.load_queue(a.queue), Path(a.state), Path(a.work), Kaggle(), a.sha, a.user,
                           client=client, auto_submit=auto, push=not a.no_push)
+    out["notes"].insert(0, login)
     print("\n".join(out["notes"]))
     if a.outcome:
         Path(a.outcome).write_text(json.dumps(out, indent=1, default=str))

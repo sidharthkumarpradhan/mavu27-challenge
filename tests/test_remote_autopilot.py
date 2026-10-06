@@ -1,10 +1,12 @@
 import datetime as dt
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
-from reva import autopilot, remote
+from reva import autopilot, package, remote
+from tests.conftest import make_rows
 from reva import config as C
 from reva.kaggle import Push
 
@@ -67,13 +69,29 @@ def test_gate_rules():
     assert autopilot.gate(run_row("b", 0.51), [sub_row("a", 0.5)], c, NOW)[0]
     assert not autopilot.gate(run_row("a", 0.9), [sub_row("a", 0.5)], c, NOW)[0]  # already submitted
     failed = [sub_row("a", 0.5, status="Failed")]
-    assert "format" in autopilot.gate(run_row("b", 0.9), failed, c, NOW)[1]
+    assert autopilot.gate(run_row("a", 0.5), failed, c, NOW)[0]  # a failed upload may be retried
+    assert autopilot.pick_format(failed, c) == "id_map"
+    all_failed = [sub_row("a", 0.5, status="Failed", fmt=f, sid=i) for i, f in enumerate(package.FORMATS)]
+    assert "every" in autopilot.gate(run_row("a", 0.5), all_failed, c, NOW)[1]
+    assert autopilot.pick_format(all_failed + [sub_row("z", 0.4, fmt="list", sid=9)], c) == "list"
+    assert "still being scored" in autopilot.gate(run_row("b", 0.9), [sub_row("a", 0.5, status="Running")], c, NOW)[1]
     four = [sub_row(f"r{i}", 0.1 * i, sid=i) for i in range(4)]
     assert "daily" in autopilot.gate(run_row("b", 0.9), four, c, NOW)[1]
     many = [sub_row(f"r{i}", 0.001 * i, day="2026-10-01", sid=i) for i in range(85)]
     assert "budget" in autopilot.gate(run_row("b", 0.9), many, c, NOW)[1]  # reserve of 15 held back
     late = NOW.replace(month=11, day=6)
     assert autopilot.gate(run_row("b", 0.9), many, c, late)[0]  # final week may spend the reserve
+
+
+TEST = make_rows("test", 1)
+
+
+def seed_annotations(work: Path) -> None:
+    """The submit step reads test.json; tests give it a small one instead of the network."""
+    ann = work / "annotations"
+    ann.mkdir(parents=True, exist_ok=True)
+    for split, rows in (("train", make_rows("train", 1)), ("val", make_rows("val", 1)), ("test", TEST)):
+        (ann / f"{split}.json").write_text(json.dumps({"metadata": {}, "QA": rows}))
 
 
 class FakeKaggle:
@@ -94,6 +112,7 @@ class FakeKaggle:
                     "n": {"test": 4000}, "train": None, "timings": {}, "versions": {}, "config": {"why": "w"},
                     "finished": "2026-10-07T11:00:00Z"}))
                 (d / f"{run_id}.zip").write_bytes(b"PK")
+                (d / "test_probs.json").write_text(json.dumps({r["qa_id"]: [0.7, 0.1, 0.1, 0.1] for r in TEST}))
         return [], "EXIT 0"
 
     def push(self, kdir, timeout_s=None, accelerator=None):
@@ -102,16 +121,20 @@ class FakeKaggle:
 
 
 class FakeClient:
-    def __init__(self):
-        self.submitted = []
+    def __init__(self, status="Finished", can=True):
+        self.submitted, self.status, self.can = [], status, can
+
+    def can_submit(self, phase):
+        return self.can, "" if self.can else "User not approved to participate in this competition"
 
     def submit(self, zip_path, comp, phase, tasks):
         assert Path(zip_path).exists()
-        self.submitted.append(zip_path.name)
-        return 99
+        self.submitted.append(zip_path)
+        return 99 + len(self.submitted)
 
     def wait(self, sid, timeout_s=0):
-        return {"status": "Finished", "scores": [{"column_key": "overall_accuracy", "score": "0.62"}]}
+        scored = [{"column_key": "overall_accuracy", "score": "0.62"}] if self.status == "Finished" else []
+        return {"status": self.status, "scores": scored}
 
     def submission(self, sid):
         return self.wait(sid)
@@ -123,6 +146,7 @@ def board_rows():
 
 def test_cycle_push_collect_submit(tmp_path):
     c, state, work = cfg(), tmp_path / "state", tmp_path / "work"
+    seed_annotations(work)
     k = FakeKaggle()
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
     assert out["pushed"] and len(out["pushed"]["runs"]) == 2 and k.pushed
@@ -131,13 +155,14 @@ def test_cycle_push_collect_submit(tmp_path):
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
     assert out["pushed"] is None and any("running" in n for n in out["notes"])
 
-    k.state, k.active_runs = "complete", out and json.loads((state / "active.json").read_text())["runs"]
+    k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
     client = FakeClient()
     later = NOW + dt.timedelta(hours=3)
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=True, now=later,
                           fetch_board=board_rows)
     assert len(out["collected"]) == 2 and not out["needs_fix"]
     assert len(client.submitted) == 1 and out["submitted"][0]["scores"] == {"overall_accuracy": 0.62}
+    assert package.validate(client.submitted[0], TEST, "fill_test") == len(TEST)  # rebuilt from test_probs
     assert out["pushed"]["runs"][0].startswith("ft-4b-")  # the next lane went out
     jobs = [json.loads(x) for x in (state / "jobs.jsonl").read_text().splitlines()]
     assert jobs[0]["hours"] == 3.0
@@ -167,7 +192,7 @@ def test_cycle_respects_auto_submit_off_and_quota(tmp_path):
     client = FakeClient()
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=False,
                           now=NOW + dt.timedelta(hours=25), fetch_board=board_rows)
-    assert not client.submitted and any("AUTO_SUBMIT off" in n for n in out["notes"])
+    assert not client.submitted and any("automatic submission off" in n for n in out["notes"])
     assert out["pushed"] is None and any("quota" in n for n in out["notes"])
 
 
@@ -177,3 +202,25 @@ def test_board_failure_never_stops_the_loop(tmp_path):
     out = autopilot.cycle(cfg(), QUEUE, tmp_path / "s", tmp_path / "w", FakeKaggle(), "sha", "me", now=NOW,
                           fetch_board=broken)
     assert out["pushed"] and any("leaderboard fetch failed" in n for n in out["notes"])
+
+
+def test_cycle_falls_back_to_the_next_format_and_reports_refusals(tmp_path):
+    c, state, work = cfg(), tmp_path / "state", tmp_path / "work"
+    seed_annotations(work)
+    k = FakeKaggle()
+    autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
+    k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
+    refused = FakeClient(can=False)
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=refused, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=1), fetch_board=board_rows, push=False)
+    assert not refused.submitted and "not approved" in out["submit_error"]
+    failing = FakeClient(status="Failed")
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=failing, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=2), fetch_board=board_rows, push=False)
+    assert out["submitted"][0]["format"] == "fill_test" and out["submitted"][0]["status"] == "Failed"
+    shutil.rmtree(work / k.pushed[0].split("/")[-1])  # a new runner: test_probs must be fetched again
+    ok = FakeClient()
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=ok, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=3), fetch_board=board_rows, push=False)
+    assert out["submitted"][0]["format"] == "id_map" and out["submitted"][0]["status"] == "Finished"
+    assert package.validate(ok.submitted[0], TEST, "id_map") == len(TEST)

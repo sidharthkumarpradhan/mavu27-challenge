@@ -46,18 +46,21 @@ train:
   lora_alpha: 32
   lora_dropout: 0.05
   shuffle_options: true
-  max_hours: 8.0              # training stops here and the run still scores dev and test
+  max_hours: 99               # optional hard cap; normally the job budget below decides (reva.job.train_deadline)
   save_every: 200
   refit: false                # final fit: holdout goes back into training
   refit_with_val: false       # owner's call, see CLAUDE.md compliance rules
   init_adapter: null          # continue from a previous run's adapter directory
+
+job:
+  max_hours: 10.5             # one lane, from its start; setup and data prep come before it in a 12 h session
 
 infer:
   perms: 1                    # option-order TTA shifts (1 = off, 4 = all cyclic shifts)
   skip_test: false
 
 submit:
-  format: fill_test           # see reva.package; the first real submission confirms it
+  format: fill_test           # tried first; if Codabench fails it, the loop tries the next layout (reva.package.FORMATS)
   min_gain: 0.003             # weighted dev accuracy must beat the best submitted run by this
   total_budget: 100           # Codabench max_submissions_per_person (Failed ones do not count)
   reserve: 15                 # kept for the final week

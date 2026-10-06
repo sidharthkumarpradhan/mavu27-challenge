@@ -141,7 +141,7 @@ class VLM:
         self.model.print_trainable_parameters()
 
 
-def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path, deadline: float,
+def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path, deadline: float | None,
           seed: int = 0) -> dict:
     """LoRA fine-tune on letter cross-entropy. Stops at the end of the epochs or at `deadline`
     (time.time()), whichever is first, and saves the adapter to out_dir/adapter.
@@ -149,14 +149,16 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
     fp16 (T4, V100) uses a GradScaler; steps with a non-finite loss are skipped and counted.
     """
     model = vlm.model
+    deadline = float("inf") if deadline is None else deadline
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=tcfg.get("lr", 2e-4), weight_decay=tcfg.get("weight_decay", 0.0))
     accum = tcfg.get("grad_accum", 8)
     limit = tcfg.get("max_samples") or len(rows)
-    total = math.ceil(min(limit, len(rows)) * tcfg.get("epochs", 1) / accum)
-    warm = max(1, int(total * tcfg.get("warmup", 0.03)))
-    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / warm) * 0.5 * (
-        1 + math.cos(math.pi * min(1.0, s / max(1, total)))))
+    plan = {"total": math.ceil(min(limit, len(rows)) * tcfg.get("epochs", 1) / accum)}
+    plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
+    # the cosine reads plan["total"] at every step, so resizing below reshapes the schedule
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / plan["warm"]) * 0.5 * (
+        1 + math.cos(math.pi * min(1.0, s / max(1, plan["total"])))))
     fp16 = vlm.cfg.get("dtype", "fp16") == "fp16" and vlm.device.startswith("cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=fp16)
     rng = random.Random(seed)
@@ -165,7 +167,21 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
     model.train()
     stats = {"steps": 0, "samples": 0, "skipped": 0, "loss": None, "stopped": "done"}
     run_loss, t0 = 0.0, time.time()
-    for i, row in enumerate(order, 1):
+    calib = tcfg.get("calib_samples", 2 * accum)
+    i = 0
+    while i < len(order):
+        row = order[i]
+        i += 1
+        if i == calib + 1 and deadline < float("inf"):
+            # self-sizing: after `calib` samples, keep only as many as fit before the deadline
+            rate = (time.time() - t0) / calib
+            fit = calib + int(0.95 * (deadline - time.time()) / rate)
+            if fit < len(order):
+                order = order[:max(calib + accum, fit)]
+                plan["total"] = math.ceil(len(order) / accum)
+                plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
+            stats["planned_samples"] = len(order)
+            print(f"train sized to {len(order)} samples at {rate:.2f} s/sample", flush=True)
         if time.time() > deadline:
             stats["stopped"] = "deadline"
             break
@@ -193,7 +209,7 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
             stats["steps"] += 1
             if stats["steps"] % tcfg.get("log_every", 25) == 0:
                 stats["loss"] = run_loss / (accum * tcfg.get("log_every", 25))
-                print(f"train step {stats['steps']}/{total} loss {stats['loss']:.4f} "
+                print(f"train step {stats['steps']}/{plan['total']} loss {stats['loss']:.4f} "
                       f"{(time.time() - t0) / i:.2f} s/sample", flush=True)
                 run_loss = 0.0
             if stats["steps"] % tcfg.get("save_every", 200) == 0:

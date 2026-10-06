@@ -70,6 +70,29 @@ def prepare(cfg: dict) -> tuple[dict[str, list[dict]], Path]:
     return sp, cache_dir
 
 
+def train_deadline(cfg: dict, vlm, sp: dict, video_of, perms: int, end: float, probe: int = 12) -> float:
+    """When training must stop so dev and test inference still finish inside the session.
+
+    Times `probe` dev questions first (warm-up included, so the estimate errs high), then reserves
+    that rate for every dev and test question plus 15% and a 10 minute margin. Training sizes
+    itself to what is left (reva.model.train), so nobody has to guess sample counts per model.
+    """
+    rows = sp["dev"][:probe]
+    t = time.time()
+    vlm.predict(rows, video_of, perms, log_every=10**9)
+    rate = (time.time() - t) / max(1, len(rows))
+    n = len(sp["dev"]) + (0 if C.get(cfg, "infer.skip_test", False) else len(sp["test"]))
+    infer_s = rate * n * 1.15 + 600
+    cap = time.time() + 3600 * C.get(cfg, "train.max_hours", 1e9)
+    deadline = min(cap, end - infer_s)
+    print(f"BUDGET {rate:.2f} s/q, inference needs {infer_s / 3600:.2f} h, "
+          f"training gets {max(0, deadline - time.time()) / 3600:.2f} h", flush=True)
+    if end - time.time() < infer_s:
+        raise RuntimeError(f"inference alone needs {infer_s / 3600:.1f} h, more than the session has left; "
+                           "use fewer frames, a smaller model, or infer.perms 1")
+    return deadline
+
+
 def run(cfg: dict, out: Path, device: str) -> dict:
     t0 = time.time()
     run_id = cfg["run_id"]
@@ -83,14 +106,15 @@ def run(cfg: dict, out: Path, device: str) -> dict:
     from reva.model import VLM, train
 
     vlm = VLM(cfg["model"], device)
+    perms = C.get(cfg, "infer.perms", 1)
+    end = t0 + 3600 * C.get(cfg, "job.max_hours", 1e9)
+    deadline = train_deadline(cfg, vlm, sp, video_of, perms, end) if train_on else None
     stats = None
     if train_on:
         vlm.add_lora(cfg["train"], C.get(cfg, "train.init_adapter"))
-        deadline = t0 + 3600 * C.get(cfg, "train.max_hours", 1e9)
         stats = train(vlm, sp["fit"], video_of, cfg["train"], out, deadline, seed=C.get(cfg, "train.seed", 0))
     timings["train_s"] = round(time.time() - t0) - sum(timings.values())
 
-    perms = C.get(cfg, "infer.perms", 1)
     dev_probs = vlm.predict(sp["dev"], video_of, perms)
     metrics = score.summary(sp["dev"], argmax(dev_probs), sp["test"], C.get(cfg, "dev.min_cell", 20))
     (out / "dev_probs.json").write_text(json.dumps(dev_probs))

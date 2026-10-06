@@ -19,9 +19,9 @@ import datetime as dt
 import json
 from pathlib import Path
 
-from reva import board, registry, remote
+from reva import board, data, package, registry, remote
 from reva import config as C
-from reva.codabench import DONE, FAILED, scores
+from reva.codabench import DONE, FAILED, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
 from reva.kaggle import FAILED as K_FAILED
 from reva.kaggle import tail
@@ -53,17 +53,30 @@ def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7) -> float:
     return sum(j.get("hours", 0) for j in jobs if parse_iso(j["collected"]) >= since)
 
 
+def pick_format(subs: list[dict], cfg: dict) -> str | None:
+    """The predictions.json layout to use. A layout Codabench scored once is kept. Until then the
+    configured one goes first, then the others, skipping any that came back Failed. Failed
+    submissions do not count against the budget, so this probe costs nothing."""
+    done = [s.get("format") for s in subs if s["status"] in DONE and s.get("format")]
+    if done:
+        return done[-1]
+    failed = {s.get("format") for s in subs if s["status"] in FAILED}
+    first = C.get(cfg, "submit.format")
+    return next((f for f in [first, *[f for f in package.FORMATS if f != first]] if f not in failed), None)
+
+
 def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool, str]:
     """Should this run be submitted now? Pure function of the state, so it is unit-tested."""
     if run.get("status") != "ok" or not run.get("zip"):
         return False, "no validated zip"
     if run.get("n", {}).get("test") != 4000:
         return False, "not a full test run"
-    if any(s["run_id"] == run["run_id"] for s in subs):
+    if any(s["run_id"] == run["run_id"] and s["status"] not in FAILED for s in subs):
         return False, "already submitted"
-    fmt = C.get(cfg, "submit.format")
-    if subs and subs[-1]["status"] in FAILED and subs[-1].get("format") == fmt:
-        return False, f"last submission failed with format {fmt!r}; a human must check submit.format"
+    if any(s["status"] not in DONE | FAILED for s in subs):
+        return False, "a submission is still being scored"
+    if pick_format(subs, cfg) is None:
+        return False, "Codabench failed every predictions.json layout; the scorer needs a code fix"
     used = [s for s in subs if s["status"] not in FAILED]
     today = [s for s in used if s["submitted"][:10] == iso(now)[:10]]
     if len(today) >= C.get(cfg, "submit.max_per_day"):
@@ -77,6 +90,28 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
     if best is not None and mine < best + C.get(cfg, "submit.min_gain"):
         return False, f"dev {mine:.4f} does not beat best submitted {best:.4f} by {C.get(cfg, 'submit.min_gain')}"
     return True, f"dev {mine:.4f}" + (f" vs best submitted {best:.4f}" if best is not None else " (first submission)")
+
+
+def candidate(runs: list[dict], subs: list[dict]) -> dict | None:
+    """Best finished full-test run by weighted dev accuracy that has no live submission yet."""
+    taken = {s["run_id"] for s in subs if s["status"] not in FAILED}
+    ok = [r for r in runs if r["status"] == "ok" and r.get("zip") and r["run_id"] not in taken]
+    return max(ok, key=lambda r: r["metrics"]["weighted_accuracy"], default=None)
+
+
+def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> Path:
+    """Rebuild the run's zip in the chosen layout from its private test_probs.json (re-downloaded
+    from the run's own kernel when this runner has not got it), validated against test.json."""
+    dest = work / run["kernel"].split("/")[-1]
+    probs_path = dest / run["run_id"] / "test_probs.json"
+    if not probs_path.exists():
+        kaggle.output(run["kernel"], dest)
+    probs = json.loads(probs_path.read_text())
+    ann = work / "annotations"
+    data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
+    preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
+    return package.write(work / "submit" / f"{run['run_id']}.zip", data.load_split(ann, "test"), preds, fmt,
+                         {"run_id": run["run_id"]})
 
 
 def summarize_config(cfg: dict) -> dict:
@@ -169,7 +204,11 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     if client:
         for s in subs:
             if s["status"] not in DONE | FAILED:
-                rec = client.submission(s["submission_id"])
+                try:
+                    rec = client.submission(s["submission_id"])
+                except CodabenchError as e:
+                    notes.append(f"could not poll submission {s['submission_id']}: {e}")
+                    continue
                 if rec.get("status") != s["status"]:
                     registry.append(state / "submissions.jsonl", {**s, "status": rec.get("status"), "scores": scores(rec)})
         subs = latest_submissions(registry.read(state / "submissions.jsonl"))
@@ -198,23 +237,32 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         else:
             notes.append(f"job {active['kernel']} is {kstate}")
 
-    # 4. gated submission of the best fresh run
-    ok = sorted([r for r in fresh if r["status"] == "ok"], key=lambda r: -r["metrics"]["weighted_accuracy"])
-    for r in ok[:1]:
+    # 4. gated submission: the best run not yet submitted, from any cycle
+    r = candidate(registry.read(state / "runs.jsonl"), subs)
+    if r:
         allowed, why = gate(r, subs, cfg, now)
-        if not (allowed and auto_submit and client):
-            notes.append(f"not submitting {r['run_id']}: {why if not allowed else 'AUTO_SUBMIT off or no Codabench login'}")
-            continue
-        zip_path = work / r["kernel"].split("/")[-1] / r["run_id"] / r["zip"]
-        sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
-                            [C.get(cfg, "competition.task")])
-        rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
-        row = {"run_id": r["run_id"], "kernel": r["kernel"], "submission_id": sid, "submitted": iso(now),
-               "status": rec.get("status"), "scores": scores(rec), "format": C.get(cfg, "submit.format"),
-               "dev_weighted": r["metrics"]["weighted_accuracy"], "dev_overall": r["metrics"]["overall_accuracy"]}
-        registry.append(state / "submissions.jsonl", row)
-        out["submitted"].append(row)
-        notes.append(f"submitted {r['run_id']} as {sid}: {why}; status {row['status']}")
+        if not allowed or not auto_submit or not client:
+            notes.append(f"not submitting {r['run_id']}: "
+                         f"{why if not allowed else 'automatic submission off' if not auto_submit else 'no Codabench login'}")
+        else:
+            try:
+                can, reason = client.can_submit(C.get(cfg, "competition.phase"))
+                if not can:
+                    raise CodabenchError(f"Codabench refuses submissions for this account: {reason}")
+                fmt = pick_format(subs, cfg)
+                zip_path = submission_zip(kaggle, r, fmt, cfg, work)
+                sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
+                                    [C.get(cfg, "competition.task")])
+                rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
+                row = {"run_id": r["run_id"], "kernel": r["kernel"], "submission_id": sid, "submitted": iso(now),
+                       "status": rec.get("status"), "scores": scores(rec), "format": fmt,
+                       "dev_weighted": r["metrics"]["weighted_accuracy"], "dev_overall": r["metrics"]["overall_accuracy"]}
+                registry.append(state / "submissions.jsonl", row)
+                out["submitted"].append(row)
+                notes.append(f"submitted {r['run_id']} as {sid} ({fmt}): {why}; status {row['status']}")
+            except CodabenchError as e:
+                out["submit_error"] = str(e)
+                notes.append(f"submission of {r['run_id']} not made: {e}")
 
     # 5. push the next lanes
     subs = latest_submissions(registry.read(state / "submissions.jsonl"))  # include this cycle's submission

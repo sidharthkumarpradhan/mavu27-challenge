@@ -2,11 +2,13 @@
 # Kaggle job, submit the best gated run, push the next queued lanes, update STATUS.md on the
 # `state` branch. See src/reva/autopilot.py.
 #
-# Switches (Settings > Secrets and variables > Actions):
-#   variable AUTOPILOT=on        runs the loop at all
-#   variable AUTO_SUBMIT=on      allows automatic Codabench submissions (default off)
-#   secrets KAGGLE_USERNAME, KAGGLE_KEY                 GPU jobs
-#   secrets CODABENCH_USERNAME, CODABENCH_PASSWORD      submissions and their scores
+# Fully automatic by default (owner's instruction, 6 Oct 2026). Kill switches in Settings > Secrets
+# and variables > Actions > Variables:
+#   AUTOPILOT=off      stops the loop
+#   AUTO_SUBMIT=off    keeps the loop running but stops Codabench submissions
+# Secrets: KAGGLE_USERNAME, KAGGLE_KEY (GPU jobs), CODABENCH_USERNAME, CODABENCH_PASSWORD
+# (submissions and scores). Optional: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN turns on the
+# headless Claude Code fixer for failed jobs, as in the EURS loop.
 # Scheduled runs use the default branch only.
 name: autopilot
 
@@ -25,7 +27,7 @@ permissions:
 
 jobs:
   cycle:
-    if: vars.AUTOPILOT == 'on'
+    if: vars.AUTOPILOT != 'off'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -34,6 +36,8 @@ jobs:
       CODABENCH_USERNAME: ${{ secrets.CODABENCH_USERNAME }}
       CODABENCH_PASSWORD: ${{ secrets.CODABENCH_PASSWORD }}
       AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +48,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install (no torch: the cycle only orchestrates)
+      - name: Install (no torch, the cycle only orchestrates)
         run: python -m pip install -q -e ".[remote,dev]"
 
       - name: Kaggle credentials
@@ -109,3 +113,14 @@ jobs:
           body = "Failed lanes in the last job: " + runs + "\n\nLog tail:\n```\n" + out.get("log_tail", "")[-6000:] + "\n```"
           subprocess.run(["gh", "issue", "create", "--title", f"Autopilot job failed: {runs}", "--body", body], check=True)
           PY
+
+      - name: Fix a failed job (headless Claude Code, only when its secret is set)
+        if: always() && (env.ANTHROPIC_API_KEY != '' || env.CLAUDE_CODE_OAUTH_TOKEN != '')
+        run: |
+          [ -f outcome.json ] || exit 0
+          python -c "import json,sys; sys.exit(0 if json.load(open('outcome.json'))['needs_fix'] else 1)" || { echo "nothing to fix"; exit 0; }
+          npm install -g @anthropic-ai/claude-code
+          mkdir -p ~/.claude && echo '{"includeCoAuthoredBy": false}' > ~/.claude/settings.json
+          git config user.name "Sidharth Pradhan"
+          git config user.email "sidharthp@assignall.ai"
+          claude -p "$(cat .github/autopilot/fix_prompt.md)" --allowedTools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode dontAsk

@@ -36,7 +36,7 @@ Engineering:
 
 Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - The owner decides. The agent prepares. Irreversible or outward-facing steps need the owner's OK,
-  unless the owner has switched on the automated path for them (see "Submission policy").
+  unless the owner has switched on the automated path for them. Submissions are on that path.
 - Compliance before score. Evidence over intuition. Every number has a source and a date.
 - Measure before building. Find the largest (test weight x gap to leader) and work only that.
 - Ceilings before architecture. Run an oracle or probe before a big build.
@@ -59,9 +59,15 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - Codabench allows 100 a day but also 100 in total per person for the only phase. Failed
   submissions do not count (`Phase.can_user_make_submissions` in the Codabench source). That is
   about 3 a day until Nov 10. The leaderboard keeps each user's best (`Force_Best`).
-- The autopilot submits only when all hold: the zip passes `reva.package.validate`, the run's
-  weighted dev accuracy beats the best submitted run by `submit.min_gain`, the daily cap leaves room,
-  and the repo variable `AUTO_SUBMIT` is `on`. The owner flips that variable. Default off.
+- Fully automatic by the owner's instruction (6 Oct 2026: "there should not be any human
+  intervention"). The autopilot submits when all hold: the zip passes `reva.package.validate`, the
+  run's weighted dev accuracy beats the best submitted run by `submit.min_gain`, no submission is
+  still being scored, the daily cap and the budget reserve leave room. Kill switches are repo
+  variables: `AUTO_SUBMIT=off` stops submissions, `AUTOPILOT=off` stops the loop.
+- The predictions.json layout is probed automatically: if Codabench fails one layout, the next
+  cycle tries the next (Failed submissions are free). A layout that scored once is kept.
+- `train.refit_with_val` stays false. Agent's call under the owner's "handle everything", made for
+  compliance (the val overlap above). Revisit only with the owner.
 - Name each submission with the run id. Calibration pairs board scores with local runs by that id.
 
 ## Verified facts (6 Oct 2026)
