@@ -27,6 +27,7 @@ configs/queue.yaml -> Kaggle job (2 lanes, one per T4) -> dev score + test zip -
 | `job` | one experiment start to finish on one GPU |
 | `remote`, `kaggle` | queue entries to a Kaggle kernel; the Kaggle CLI wrapper |
 | `board`, `codabench` | public leaderboard; login, upload, submit, poll |
+| `preflight` | last checks before an upload, and the projected board score |
 | `autopilot` | one cycle (twice an hour): board, collect, gated submit, push next, STATUS.md |
 | `smoke` | the whole GPU job on CPU with a tiny model and synthetic videos |
 
@@ -39,7 +40,7 @@ make smoke          # full job on CPU, prints READY
 python -m reva.cli board                     # live leaderboard
 python -m reva.cli build --sha <commit>      # the Kaggle kernel for the next queued lanes (pushes nothing)
 python -m reva.cli job --config-json run.json --out out/   # one experiment on a local GPU
-python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission
+python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission, same checks
 ```
 
 ## Automation
@@ -50,9 +51,13 @@ python -m reva.cli submit --run <run_id> --state state/      # owner-triggered s
 2. Poll open submissions.
 3. Collect a finished Kaggle job: dev metrics into `runs.jsonl`, the zip kept in the kernel's
    private output.
-4. Submit the best new run if `reva.autopilot.gate` allows it and `AUTO_SUBMIT` is `on`.
+4. Submit the best new run if `reva.autopilot.gate` allows it, `AUTO_SUBMIT` is `on`, and the
+   rebuilt zip passes `reva.preflight` (file rules, round trip to the run's own probabilities,
+   compliance flags, letter balance, live board metric). A run that fails is recorded in
+   `blocked.jsonl` and never retried.
 5. Push the next pending queue entries as a new kernel, within the weekly GPU quota.
-6. Write `STATUS.md` (board, our gap per task, calibration, runs, budgets) on the `state` branch.
+6. Write `STATUS.md` (board, the next candidate's projected board score, our gap per task,
+   calibration, runs, budgets) on the `state` branch.
 
 Repo settings it needs: variables `AUTOPILOT=on` and, when the owner decides, `AUTO_SUBMIT=on`;
 secrets `KAGGLE_USERNAME`, `KAGGLE_KEY`, `CODABENCH_USERNAME`, `CODABENCH_PASSWORD`.

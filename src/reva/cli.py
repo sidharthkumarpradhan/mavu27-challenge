@@ -93,12 +93,12 @@ def cmd_autopilot(a) -> int:
 
 
 def cmd_submit(a) -> int:
-    """Owner-triggered submission of a finished run: download its zip from its private kernel,
-    validate it, submit, wait, record. Skips the dev-gain gate (the owner decided), never the
-    format and budget checks."""
-    from reva import data, package, registry
-    from reva.autopilot import iso, latest_submissions, submit_as
-    from reva.codabench import scores
+    """Owner-triggered submission of a finished run: rebuild its zip from its private kernel output,
+    run every pre-upload check, submit, wait, record. Skips the dev-gain gate (the owner decided),
+    never the budget or the pre-upload checks (reva.preflight)."""
+    from reva import preflight, registry
+    from reva.autopilot import checked_zip, iso, latest_submissions, pick_format, submit_as
+    from reva.codabench import CodabenchError, scores
     from reva.kaggle import Kaggle
 
     cfg = _cfg(a)
@@ -112,14 +112,18 @@ def cmd_submit(a) -> int:
     if used >= C.get(cfg, "submit.total_budget"):
         print("submission budget used up")
         return 1
-    dest = Path(a.work) / run["kernel"].split("/")[-1]
-    Kaggle().output(run["kernel"], dest)
-    zip_path = dest / run["run_id"] / run["zip"]
-    data.fetch_annotations(C.get(cfg, "data.root"), C.get(cfg, "data.hf_repo"))
-    package.validate(zip_path, data.load_split(C.get(cfg, "data.root"), "test"), C.get(cfg, "submit.format"))
     client = _client(cfg)
     if not client:
         print("set CODABENCH_USERNAME and CODABENCH_PASSWORD")
+        return 1
+    fmt = pick_format(subs, cfg)
+    if fmt is None:
+        print("Codabench failed every predictions.json layout; the scorer needs a code fix")
+        return 1
+    try:
+        zip_path = checked_zip(Kaggle(), run, fmt, cfg, Path(a.work))
+    except (preflight.Blocked, CodabenchError) as e:
+        print(f"not submitting {run['run_id']}: {e}")
         return 1
     sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
                         [C.get(cfg, "competition.task")], organization=submit_as(client, cfg))
@@ -127,7 +131,7 @@ def cmd_submit(a) -> int:
     registry.append(state / "submissions.jsonl", {
         "run_id": run["run_id"], "kernel": run["kernel"], "submission_id": sid,
         "submitted": iso(dt.datetime.now(dt.timezone.utc)), "status": rec.get("status"), "scores": scores(rec),
-        "format": C.get(cfg, "submit.format"), "dev_weighted": run["metrics"]["weighted_accuracy"],
+        "format": fmt, "dev_weighted": run["metrics"]["weighted_accuracy"],
         "dev_overall": run["metrics"]["overall_accuracy"], "manual": True})
     print(f"submission {sid}: {rec.get('status')} {scores(rec)}")
     return 0

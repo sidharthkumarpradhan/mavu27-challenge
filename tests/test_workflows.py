@@ -39,3 +39,14 @@ def test_autopilot_runs_twice_an_hour():
     # a finished job waits at most half an hour to be collected and submitted
     d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
     assert [s["cron"] for s in d[True]["schedule"]] == ["23,53 * * * *"]
+
+
+def test_every_state_file_is_saved():
+    # a state file the save step does not add is lost when the runner ends (blocked.jsonl, 7 Oct 2026)
+    import re
+
+    from reva import autopilot
+    named = set(re.findall(r"^- (\S+\.(?:json|jsonl|csv|md)) ", autopilot.__doc__, re.M))
+    text = (ROOT / ".github" / "workflows" / "autopilot.yml").read_text()
+    saved = set(re.search(r"for f in ([^;]+); do", text).group(1).split())
+    assert named and named <= saved, named - saved
