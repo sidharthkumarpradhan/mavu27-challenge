@@ -1,9 +1,7 @@
-# ReVA autopilot status (2026-10-07T17:32:23Z)
+# ReVA autopilot status (2026-10-07T17:52:39Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 7 rows, 0 new; leader mkhlystun 0.8735
-- job tubu9938/reva-ft-4b-16f-830869b1 error; failed lanes: ['ft-4b-16f-830869b1', 'zs-8b-4bit-029fe922'] 
-- collected ['ft-4b-16f-830869b1', 'zs-8b-4bit-029fe922']
 - Kaggle weekly GPU quota reached on account 1
 - Kaggle account 2 kernels have no internet (is its phone number verified?); next try after 2026-10-07T23:32:23Z
 - no Kaggle account can take the next job; it waits
