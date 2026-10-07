@@ -9,6 +9,7 @@ State lives in a directory that the workflow keeps on the `state` branch:
 - runs.jsonl         one row per lane: run id, status, dev metrics, hours, config summary
 - submissions.jsonl  one row per Codabench submission, updated by appending newer rows
 - blocked.jsonl      runs the pre-upload checks stopped (reva.preflight), never retried
+- arena.json         the run ids the arena last averaged (reva.arena), so it reruns only on new runs
 - board.csv          every leaderboard row ever seen
 - STATUS.md          the human summary
 The repo is public. Nothing here holds test predictions or probabilities.
@@ -18,9 +19,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import traceback
 from pathlib import Path
 
-from reva import board, data, package, preflight, registry, remote
+from reva import arena, board, data, package, preflight, registry, remote
 from reva import config as C
 from reva.codabench import DONE, FAILED, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
@@ -103,13 +105,10 @@ def candidate(runs: list[dict], subs: list[dict], blocked: set[str] = frozenset(
 
 def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[Path, list[dict], dict]:
     """Rebuild the run's zip in the chosen layout from its private test_probs.json (re-downloaded
-    from the run's own kernel when this runner has not got it), validated against test.json.
-    Returns (zip, test rows, test probabilities) for the pre-upload checks."""
-    dest = work / run["kernel"].split("/")[-1]
-    probs_path = dest / run["run_id"] / "test_probs.json"
-    if not probs_path.exists():
-        kaggle.output(run["kernel"], dest)
-    probs = json.loads(probs_path.read_text())
+    from the run's own kernel when this runner has not got it; averaged over the members for an
+    ensemble), validated against test.json. Returns (zip, test rows, test probabilities) for the
+    pre-upload checks."""
+    probs = arena.load_probs(kaggle, run, work, "test_probs.json")
     ann = work / "annotations"
     data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
     test = data.load_split(ann, "test")
@@ -143,7 +142,8 @@ def checked_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path, fetch_column
     if problem := preflight.metric_problem(columns):
         raise CodabenchError(problem)
     zip_path, test, probs = submission_zip(kaggle, run, fmt, cfg, work)
-    if problems := preflight.check(zip_path, test, probs, fmt, [run_config(kaggle, run, work)]):
+    configs = [run_config(kaggle, m, work) for m in run.get("members") or [run]]  # every member must comply
+    if problems := preflight.check(zip_path, test, probs, fmt, configs):
         raise preflight.Blocked(problems)
     return zip_path
 
@@ -277,6 +277,26 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         else:
             notes.append(f"job {active['kernel']} is {kstate}")
 
+    # 3b. arena: an average of the best runs competes with them on dev
+    runs = registry.read(state / "runs.jsonl")
+    seen_path = state / "arena.json"
+    seen = json.loads(seen_path.read_text())["considered"] if seen_path.exists() else []
+    if len(arena.eligible(runs)) >= 2 and sorted(r["run_id"] for r in arena.eligible(runs)) != sorted(seen):
+        try:
+            ann = work / "annotations"
+            data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
+            sp = data.make_splits(ann, C.get(cfg, "dev.holdout_frac"), C.get(cfg, "dev.seed"))
+            row, considered, note = arena.step(kaggle, runs, sp["dev"], sp["test"], work, seen, iso(now),
+                                               C.get(cfg, "dev.min_cell"))
+            if row:
+                registry.append(state / "runs.jsonl", row)
+            seen_path.write_text(json.dumps({"considered": considered, "when": iso(now)}))
+            if note:
+                notes.append(note)
+        except Exception as e:  # the arena adds a candidate; it never stops the loop
+            traceback.print_exc()  # the full error goes to the Actions log; STATUS.md gets the type only
+            notes.append(f"arena skipped this cycle: {type(e).__name__}")
+
     # 4. gated submission: the best run not yet submitted, from any cycle
     blocked = {b["run_id"] for b in registry.read(state / "blocked.jsonl")}
     r = candidate(registry.read(state / "runs.jsonl"), subs, blocked)
@@ -301,10 +321,12 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
                                     [C.get(cfg, "competition.task")], organization=org)
                 rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
-                row = {"run_id": r["run_id"], "kernel": r["kernel"], "submission_id": sid, "submitted": iso(now),
+                row = {"run_id": r["run_id"], "kernel": r.get("kernel"), "submission_id": sid, "submitted": iso(now),
                        "status": rec.get("status"), "scores": scores(rec), "format": fmt,
                        "organization": C.get(cfg, "competition.organization"),
                        "dev_weighted": r["metrics"]["weighted_accuracy"], "dev_overall": r["metrics"]["overall_accuracy"]}
+                if r.get("members"):
+                    row["members"] = [m["run_id"] for m in r["members"]]
                 registry.append(state / "submissions.jsonl", row)
                 out["submitted"].append(row)
                 notes.append(f"submitted {r['run_id']} as {sid} ({fmt}): {why}; status {row['status']}")

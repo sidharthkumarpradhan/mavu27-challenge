@@ -105,6 +105,9 @@ From the Codabench pages (read in full 6 Oct 2026):
 - The test labels are hidden, so no local check proves a board score. STATUS.md shows a projection
   (dev weighted plus the mean board-minus-dev gap of our scored submissions). It is not a gate:
   holding back until we project above the leader would skip the format check and calibration.
+- Arena ensembles (`reva.arena`) are candidates like any run: picked on dev only, never on the
+  board. Only single video runs without refit or val training take part. Preflight reads every
+  member's run.json, so one non-compliant member blocks the ensemble.
 - Name each submission with the run id. Calibration pairs board scores with local runs by that id.
 - Submit as the Codabench organization StagAI (owner's choice, 6 Oct 2026), set in
   `competition.organization`. If the account cannot submit for it, the loop submits nothing.
