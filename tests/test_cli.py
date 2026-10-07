@@ -42,7 +42,7 @@ def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
                                                                                   "overall_accuracy": 0.5}})
     real = k.output
 
-    def one_letter(slug, dest):
+    def one_letter(slug, dest, file_pattern=None):
         out = real(slug, dest)
         (dest / "zs-4b-x" / "test_probs.json").write_text(json.dumps(probs_for(TEST, "C")))
         return out
@@ -58,3 +58,28 @@ def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
     for f in (work / "reva-zs-4b-x" / "zs-4b-x").glob("*_probs.json"):
         f.unlink()
     assert cli.main(argv) == 0 and len(client.submitted) == 1
+
+
+def test_manual_submit_takes_an_arena_ensemble(tmp_path, monkeypatch):
+    import json
+
+    import reva.kaggle
+    from reva import preflight, registry
+    from tests.conftest import BOARD_COLUMNS
+    from tests.test_remote_autopilot import FakeClient, FakeKaggle, seed_annotations
+
+    state, work = tmp_path / "state", tmp_path / "work"
+    seed_annotations(work)
+    k = FakeKaggle()
+    k.active_runs = ["a", "b"]
+    members = [{"run_id": "a", "kernel": "u/reva-ab"}, {"run_id": "b", "kernel": "u/reva-ab"}]
+    registry.append(state / "runs.jsonl", {"run_id": "ens-1", "status": "ok", "zip": "rebuilt from members",
+                                           "members": members, "metrics": {"weighted_accuracy": 0.7,
+                                                                           "overall_accuracy": 0.7}})
+    client = FakeClient()
+    monkeypatch.setattr(reva.kaggle, "Kaggle", lambda: k)
+    monkeypatch.setattr(cli, "_client", lambda cfg: client)
+    monkeypatch.setattr(preflight, "live_columns", lambda *a, **kw: BOARD_COLUMNS)
+    assert cli.main(["submit", "--run", "ens-1", "--state", str(state), "--work", str(work)]) == 0
+    row = json.loads((state / "submissions.jsonl").read_text().splitlines()[-1])
+    assert len(client.submitted) == 1 and row["members"] == ["a", "b"] and row["kernel"] is None

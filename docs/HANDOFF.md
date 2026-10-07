@@ -40,6 +40,9 @@ These are the first things the first job will tell us. Check its log before trus
 - Pre-upload checks (`reva.preflight`) run on every rebuilt zip before it goes to Codabench.
   STATUS.md shows the next candidate's dev score with a 95% interval and a projected board score.
 - Account approved: STATUS shows "submits as StagAI (id 2763)".
+- Model arena (`reva.arena`): once two or more fair runs exist, the loop averages the top k on
+  dev and adds the winner as an `ens-` run. It goes through the same gate and preflight.
+  `arena.json` on the state branch records which runs were last compared.
 
 ## Next steps, in order
 
@@ -55,5 +58,6 @@ These are the first things the first job will tell us. Check its log before trus
 - 32 frames (the paper's setting) once the 16-frame speed is known.
 - Option-shift TTA with `infer.perms: 4`.
 - Refit on train plus holdout for the final submission (`train.refit: true`).
-- Ensembling lanes by averaging `test_probs.json` (needs a small `reva` command).
+- More backbones in the arena (Qwen2.5-VL-7B, InternVL3.5, LLaVA-OneVision) so the mix has
+  diverse members, not only Qwen3-VL variants.
 - The owner's V100 box can run `reva.job` directly for longer fine-tunes.

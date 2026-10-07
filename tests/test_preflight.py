@@ -109,7 +109,7 @@ def collected(tmp_path, letter=None):
     if letter:
         real = k.output
 
-        def one_letter(slug, dest):
+        def one_letter(slug, dest, file_pattern=None):
             out = real(slug, dest)
             for run_id in k.active_runs:
                 (dest / run_id / "test_probs.json").write_text(json.dumps(probs_for(TEST, letter)))
@@ -156,7 +156,7 @@ def test_cycle_blocks_a_run_with_missing_probabilities_instead_of_crashing(tmp_p
     c, state, work, k = collected(tmp_path)
     real = k.output
 
-    def short(slug, dest):
+    def short(slug, dest, file_pattern=None):
         out = real(slug, dest)
         for run_id in k.active_runs:
             (dest / run_id / "test_probs.json").write_text(json.dumps(probs_for(TEST[1:])))
@@ -173,7 +173,7 @@ def test_cycle_blocks_a_run_whose_config_lacks_the_compliance_flags(tmp_path):
     c, state, work, k = collected(tmp_path)
     real = k.output
 
-    def old_run(slug, dest):
+    def old_run(slug, dest, file_pattern=None):
         out = real(slug, dest)
         for run_id in k.active_runs:
             rj = dest / run_id / "run.json"

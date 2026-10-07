@@ -28,6 +28,7 @@ configs/queue.yaml -> Kaggle job (2 lanes, one per T4) -> dev score + test zip -
 | `remote`, `kaggle` | queue entries to a Kaggle kernel; the Kaggle CLI wrapper |
 | `board`, `codabench` | public leaderboard; login, upload, submit, poll |
 | `preflight` | last checks before an upload, and the projected board score |
+| `arena` | averages the best runs' probabilities; the best top-k mix on dev becomes one more candidate |
 | `autopilot` | one cycle (twice an hour): board, collect, gated submit, push next, STATUS.md |
 | `smoke` | the whole GPU job on CPU with a tiny model and synthetic videos |
 
@@ -51,6 +52,8 @@ python -m reva.cli submit --run <run_id> --state state/      # owner-triggered s
 2. Poll open submissions.
 3. Collect a finished Kaggle job: dev metrics into `runs.jsonl`, the zip kept in the kernel's
    private output.
+   Then the arena: when a new run arrives, the mean of the top k runs (k from 2 to 5, picked on
+   dev) joins `runs.jsonl` as one more candidate if it beats the best single run on dev.
 4. Submit the best new run if `reva.autopilot.gate` allows it, `AUTO_SUBMIT` is `on`, and the
    rebuilt zip passes `reva.preflight` (file rules, round trip to the run's own probabilities,
    compliance flags, letter balance, live board metric). A run that fails is recorded in

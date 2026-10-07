@@ -117,7 +117,7 @@ class FakeKaggle:
     def status(self, slug):
         return self.state, ""
 
-    def output(self, slug, dest):
+    def output(self, slug, dest, file_pattern=None):
         for run_id in self.active_runs:
             d = dest / run_id
             d.mkdir(parents=True, exist_ok=True)

@@ -128,11 +128,13 @@ def cmd_submit(a) -> int:
     sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
                         [C.get(cfg, "competition.task")], organization=submit_as(client, cfg))
     rec = client.wait(sid, timeout_s=60 * C.get(cfg, "submit.wait_minutes"))
-    registry.append(state / "submissions.jsonl", {
-        "run_id": run["run_id"], "kernel": run["kernel"], "submission_id": sid,
-        "submitted": iso(dt.datetime.now(dt.timezone.utc)), "status": rec.get("status"), "scores": scores(rec),
-        "format": fmt, "dev_weighted": run["metrics"]["weighted_accuracy"],
-        "dev_overall": run["metrics"]["overall_accuracy"], "manual": True})
+    row = {"run_id": run["run_id"], "kernel": run.get("kernel"), "submission_id": sid,
+           "submitted": iso(dt.datetime.now(dt.timezone.utc)), "status": rec.get("status"), "scores": scores(rec),
+           "format": fmt, "dev_weighted": run["metrics"]["weighted_accuracy"],
+           "dev_overall": run["metrics"]["overall_accuracy"], "manual": True}
+    if run.get("members"):  # an arena ensemble: its zip is the mean of these runs' test probabilities
+        row["members"] = [m["run_id"] for m in run["members"]]
+    registry.append(state / "submissions.jsonl", row)
     print(f"submission {sid}: {rec.get('status')} {scores(rec)}")
     return 0
 
