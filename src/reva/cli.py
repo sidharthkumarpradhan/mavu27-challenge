@@ -154,7 +154,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("fetch")
     sub.add_parser("board")
-    sub.add_parser("smoke").add_argument("--out", default="work/smoke")
+    s = sub.add_parser("smoke")
+    s.add_argument("--out", default="work/smoke")
+    s.add_argument("--model", default=None, help="tiny model id (default: tiny Qwen3-VL)")
     j = sub.add_parser("job")
     j.add_argument("--config-json", dest="job_config", required=True)
     j.add_argument("--out", required=True)
@@ -184,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "smoke":
         from reva import smoke
 
-        return smoke.main(["--out", a.out])
+        return smoke.main(["--out", a.out] + (["--model", a.model] if a.model else []))
     if a.cmd == "job":
         from reva import job
 

@@ -22,3 +22,7 @@ jobs:
         run: python -m pytest -q
       - name: Smoke (whole GPU job on CPU, tiny model, synthetic videos)
         run: python -m reva.cli smoke --out work/smoke
+      - name: Smoke, other backbone families in configs/queue.yaml
+        run: |
+          python -m reva.cli smoke --out work/smoke-qwen35 --model trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration
+          python -m reva.cli smoke --out work/smoke-internvl --model trl-internal-testing/tiny-InternVLForConditionalGeneration

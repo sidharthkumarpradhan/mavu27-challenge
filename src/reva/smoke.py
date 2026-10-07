@@ -70,6 +70,7 @@ def synthetic(root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="work/smoke")
+    ap.add_argument("--model", default=TINY, help="a tiny model of the family a queue entry uses")
     a = ap.parse_args(argv)
     out = Path(a.out)
     shutil.rmtree(out, ignore_errors=True)
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = C.override(C.load(), {
         "run_id": "smoke", "data.root": str(out / "data"), "data.video_root": str(out / "data"),
         "frames.cache": str(out / "frames"), "frames.n": 4, "frames.max_side": 64, "frames.workers": 1,
-        "model.id": TINY, "model.dtype": "fp32", "train.enabled": True, "train.grad_accum": 2,
+        "model.id": a.model, "model.dtype": "fp32", "train.enabled": True, "train.grad_accum": 2,
         "train.log_every": 1, "dev.holdout_frac": 0.0, "dev.min_cell": 1, "infer.perms": 2,
         "limit.test": 1000})
     result = job.run(cfg, out / "run", "cpu")

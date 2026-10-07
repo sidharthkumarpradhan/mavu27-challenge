@@ -10,6 +10,8 @@ shifts and the probabilities are mapped back and averaged. This cancels any lett
 The same idea in training: every step shows the options in a random order.
 
 Default backbone: Qwen3-VL (transformers native). It takes frames plus their real timestamps.
+Any transformers-native video model loads the same way. CI runs the whole job on tiny Qwen3-VL,
+Qwen3.5 and InternVL models (reva.smoke --model).
 """
 
 from __future__ import annotations
@@ -58,7 +60,8 @@ class VLM:
 
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=kwargs["dtype"],
-                bnb_4bit_use_double_quant=True, llm_int8_skip_modules=["visual", "lm_head"])
+                bnb_4bit_use_double_quant=True,
+                llm_int8_skip_modules=["visual", "vision_tower", "multi_modal_projector", "lm_head"])  # Qwen, InternVL/LLaVA names
         if device.startswith("cuda"):
             kwargs["device_map"] = {"": device}
             kwargs["attn_implementation"] = mcfg.get("attn", "sdpa")
@@ -81,8 +84,12 @@ class VLM:
         if video is not None and self.cfg.get("timestamps_in_text"):
             times = [float(i) / float(video["fps"]) for i in video["indices"]]
         content.append({"type": "text", "text": prompt_text(row, order, times)})
+        # The answer letter must be the first token. Hybrid models (Qwen3.5) open a <think> block
+        # unless told not to; templates without the switch ignore it.
         text = self.processor.apply_chat_template([{"role": "user", "content": content}],
-                                                  add_generation_prompt=True, tokenize=False)
+                                                  add_generation_prompt=True, tokenize=False, enable_thinking=False)
+        if text.rstrip().endswith("<think>"):
+            raise ValueError(f"{self.cfg['id']} opens a reasoning block before the answer; letter scoring needs it closed")
         kw = {"text": [text], "return_tensors": "pt"}
         if video is not None:
             fps = float(video["fps"])
