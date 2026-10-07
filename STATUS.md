@@ -1,9 +1,9 @@
-# ReVA autopilot status (2026-10-07T09:43:53Z)
+# ReVA autopilot status (2026-10-07T10:04:36Z)
 
 - Codabench login ok; account may submit; submits as StagAI (id 2763)
 - leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
 - next candidate zs-4b-6254e8de: dev weighted 0.7130 +/- 0.0155, projected board 0.7130 (0 calibration pairs); leader 0.8735, below by 0.1605
-- submission of zs-4b-6254e8de not made: submission create failed (400): You do not have participant permissions for this group
+- submission of zs-4b-6254e8de not made: upload completed failed (500)
 - Kaggle weekly GPU quota reached; the next job waits for it to reset
 
 ## Leaderboard (top 8)
