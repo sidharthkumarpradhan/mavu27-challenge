@@ -61,10 +61,12 @@ def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7) -> float:
 def public(e: Exception) -> str:
     """Error text that is safe for STATUS.md, which is public. Codabench errors end with the
     response body after the status code, e.g. "submission create failed (400): {...}". Keep the
-    part up to the status code and drop the body."""
+    part up to the status code and drop the body. A known Codabench message (codabench.KNOWN_REASONS)
+    is added back, since it names the cause and carries nothing else from the response."""
     text = str(e)
     m = re.match(r"(.*?\(\d{3}\))", text, re.S)
-    return m.group(1) if m else text
+    reason = getattr(e, "reason", None)
+    return (m.group(1) if m else text) + (f": {reason}" if m and reason else "")
 
 
 def pick_format(subs: list[dict], cfg: dict) -> str | None:

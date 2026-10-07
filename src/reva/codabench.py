@@ -28,8 +28,28 @@ DONE = {"Finished"}
 FAILED = {"Failed", "Cancelled"}
 
 
+# Codabench's own fixed validation messages for a refused submission (src/apps/api/views/submissions.py,
+# serializers/submissions.py, competitions/models.py, read 7 Oct 2026). A response body never goes into
+# public STATUS.md, but one of these names the cause without carrying anything else from the response.
+KNOWN_REASONS = (
+    "You must be apart of a organization to submit for them",
+    "You do not have participant permissions for this group",
+    "You do not have access to this competition to make a submission",
+    "All tasks must be part of the current phase.",
+    "This phase is not currently accepting submissions.",
+    "Reached maximum allowed submissions for today for this phase",
+    "Reached maximum allowed submissions for this phase",
+    "Fact Sheet keys do not match Answer keys",
+    "Invalid pk",
+    "Object with key=",
+    "This field is required.",
+)
+
+
 class CodabenchError(RuntimeError):
-    pass
+    def __init__(self, message: str, reason: str | None = None):
+        super().__init__(message)
+        self.reason = reason  # one of KNOWN_REASONS, safe to show publicly
 
 
 class Client:
@@ -50,7 +70,8 @@ class Client:
 
     def _ok(self, r: requests.Response, what: str) -> dict:
         if r.status_code >= 300:
-            raise CodabenchError(f"{what} failed ({r.status_code}): {r.text[:500]}")
+            reason = next((k for k in KNOWN_REASONS if k in r.text), None)
+            raise CodabenchError(f"{what} failed ({r.status_code}): {r.text[:500]}", reason)
         return r.json() if r.content else {}
 
     def can_submit(self, phase: int) -> tuple[bool, str]:
