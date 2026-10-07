@@ -271,7 +271,7 @@ def test_cycle_waits_when_every_account_is_out_of_quota(tmp_path):
                           fetch_board=board_rows)
     assert out["pushed"] is None and out["push_refused"] and out["waiting"]
     status = (state / "STATUS.md").read_text()
-    assert "account 1" in status and "account 2" in status and "waits for a reset" in status
+    assert "account 1" in status and "account 2" in status and "no Kaggle account can take the next job" in status
 
 
 def test_gpu_pacing_counts_each_account_apart(tmp_path):
@@ -281,6 +281,32 @@ def test_gpu_pacing_counts_each_account_apart(tmp_path):
     assert autopilot.gpu_hours(registry.read(state / "jobs.jsonl"), NOW, user="second") == 0
     autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["first", "second"], now=NOW, fetch_board=board_rows)
     assert k.pushed[0].startswith("second/")  # 25 h + an 11.5 h job would pass the first account's 30 h
+
+
+def offline_row(run_id, finished, kernel="second/reva-a"):
+    return {"run_id": run_id, "status": "failed", "kernel": kernel, "finished": autopilot.iso(finished), "sha": "s",
+            "error": "fatal: unable to access 'https://github.com/x/': Could not resolve host: github.com"}
+
+
+def test_no_internet_does_not_use_up_a_lanes_retries(tmp_path):
+    # 7 Oct 2026: the second account had no internet, so both lanes failed in setup; two such
+    # failures would have dropped the experiments from the queue for good
+    state, work, k = tmp_path / "state", tmp_path / "work", FakeKaggle()
+    lane = remote.pending(cfg(), QUEUE, set(), {})[0]["run_id"]
+    for h in (3, 2):
+        registry.append(state / "runs.jsonl", offline_row(lane, NOW - dt.timedelta(hours=h + 6)))
+    out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["first", "second"], now=NOW, fetch_board=board_rows)
+    assert lane in out["pushed"]["runs"]
+
+
+def test_offline_account_rests_then_gets_another_try(tmp_path):
+    state, work, k = tmp_path / "state", tmp_path / "work", FakeKaggle()
+    registry.append(state / "runs.jsonl", offline_row("x", NOW - dt.timedelta(hours=1)))
+    out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["second", "first"], now=NOW, fetch_board=board_rows)
+    assert k.pushed[0].startswith("first/")  # the offline account is skipped
+    assert "account 1 kernels have no internet" in (state / "STATUS.md").read_text()
+    later = NOW + dt.timedelta(hours=6)
+    assert autopilot.offline_until(registry.read(state / "runs.jsonl"), "second") <= later  # retried after 6 h
 
 
 class BrokenKaggle(FakeKaggle):

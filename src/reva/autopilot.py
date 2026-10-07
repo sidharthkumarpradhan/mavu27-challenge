@@ -60,6 +60,24 @@ def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7, user: str | Non
                and (user is None or j.get("kernel", "").split("/")[0].lower() == user.lower()))
 
 
+NO_INTERNET = ("Could not resolve host", "Temporary failure in name resolution")
+
+
+def no_internet(run: dict) -> bool:
+    """A lane that died because its kernel had no internet. That is the account's fault, not the
+    experiment's: Kaggle turns internet off for an account without a verified phone (7 Oct 2026)."""
+    return run.get("status") != "ok" and any(s in run.get("error", "") for s in NO_INTERNET)
+
+
+def offline_until(runs: list[dict], user: str, hours: float = 6) -> dt.datetime | None:
+    """When to try `user` again if its latest lane had no internet, else None."""
+    mine = [r for r in runs if r.get("kernel", "").split("/")[0].lower() == user.lower() and r.get("finished")]
+    if not mine:
+        return None
+    last = max(mine, key=lambda r: r["finished"])
+    return parse_iso(last["finished"]) + dt.timedelta(hours=hours) if no_internet(last) else None
+
+
 def public(e: Exception) -> str:
     """Error text that is safe for STATUS.md, which is public. Codabench errors end with the
     response body after the status code, e.g. "submission create failed (400): {...}". Keep the
@@ -358,13 +376,18 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         done = {r["run_id"] for r in runs if r["status"] == "ok"}
         failed: dict[str, int] = {}
         for r in runs:
-            if r["status"] != "ok":
+            if r["status"] != "ok" and not no_internet(r):  # an offline account does not use up a lane's retries
                 failed[r["run_id"]] = failed.get(r["run_id"], 0) + 1
         lanes = remote.pending(cfg, queue, done, failed)[: C.get(cfg, "remote.lanes")]
         users = [kaggle_users] if isinstance(kaggle_users, str) else list(kaggle_users)
         if not lanes:
             notes.append("queue empty: add experiments to configs/queue.yaml")
         for n, user in enumerate(users if lanes else [], 1):
+            retry = offline_until(runs, user)
+            if retry and retry > now:
+                notes.append(f"Kaggle account {n} kernels have no internet (is its phone number verified?); "
+                             f"next try after {iso(retry)}")
+                continue
             used = gpu_hours(jobs, now, user=user)
             if used + C.get(cfg, "remote.max_hours") > C.get(cfg, "remote.weekly_gpu_hours"):
                 notes.append(f"GPU quota pacing on Kaggle account {n}: {used:.1f} h used in 7 days")
@@ -392,7 +415,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             break
         else:
             if lanes:
-                notes.append("no Kaggle account has GPU quota left; the next job waits for a reset")
+                notes.append("no Kaggle account can take the next job; it waits")
 
     # something will change without a push: a Kaggle job still running or a submission still being
     # scored. The workflow starts the next cycle itself while this holds.
