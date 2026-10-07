@@ -1,21 +1,15 @@
-# ReVA autopilot status (2026-10-07T10:45:53Z)
+# ReVA autopilot status (2026-10-07T11:06:27Z)
 
 - Codabench login ok; account may submit; submits as StagAI (id 2763)
-- leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
-- next candidate zs-4b-6254e8de: dev weighted 0.7130 +/- 0.0155, projected board 0.7130 (0 calibration pairs); leader 0.8735, below by 0.1605
-- submission of zs-4b-6254e8de not made: submission create failed (400): You do not have participant permissions for this group
+- leaderboard fetch failed: 500 Server Error: Internal Server Error for url: https://www.codabench.org/api/phases/30831/get_leaderboard/
+- next candidate zs-4b-6254e8de: dev weighted 0.7130 +/- 0.0155, projected board 0.7130 (0 calibration pairs)
+- submission of zs-4b-6254e8de not made: could not read the live leaderboard columns; trying again next cycle
 - Kaggle weekly GPU quota reached; the next job waits for it to reset
 
 ## Leaderboard (top 8)
 
 | # | owner | overall |
 |---|---|---|
-| 1 | mkhlystun | 0.8735 |
-| 2 | h | 0.8625 |
-| 3 | amirmazaheri | 0.8313 |
-| 4 | Vincente | 0.8257 |
-| 5 | Hoang Bui | 0.6793 |
-| 6 | chrisathy | 0.2515 |
 
 ## Runs (newest first)
 
