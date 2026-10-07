@@ -142,4 +142,4 @@ jobs:
               || { echo "nothing open; the next push or schedule starts the loop"; exit 0; }
           fi
           sleep 1200
-          gh workflow run autopilot.yml --ref main
+          gh workflow run autopilot.yml --ref main --repo "$GITHUB_REPOSITORY"  # no checkout needed

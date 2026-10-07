@@ -58,5 +58,6 @@ def test_autopilot_chains_itself_while_waiting():
     assert d["permissions"]["actions"] == "write"
     last = d["jobs"]["cycle"]["steps"][-1]
     assert last["if"] == "always()" and "waiting" in last["run"]
-    assert "gh workflow run autopilot.yml --ref main" in last["run"]
+    # the dispatch must not depend on a checked-out repo: an always() step runs after a failed checkout
+    assert "gh workflow run autopilot.yml --ref main --repo \"$GITHUB_REPOSITORY\"" in last["run"]
     assert d["jobs"]["cycle"]["timeout-minutes"] > 20 + 10  # the wait plus a cycle fits
