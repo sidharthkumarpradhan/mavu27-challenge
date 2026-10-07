@@ -82,6 +82,8 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - `train.refit_with_val` stays false. Agent's call under the owner's "handle everything", made for
   compliance (the val overlap above). Revisit only with the owner.
 - Name each submission with the run id. Calibration pairs board scores with local runs by that id.
+- Submit as the Codabench organization StagAI (owner's choice, 6 Oct 2026), set in
+  `competition.organization`. If the account cannot submit for it, the loop submits nothing.
 
 ## Verified facts (6 Oct 2026)
 

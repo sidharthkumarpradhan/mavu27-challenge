@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 
 from reva import board, codabench
@@ -61,6 +63,8 @@ class FakeSession:
 
     def get(self, url, timeout=None):
         self.calls.append(("GET", url, None))
+        if url.endswith("/participant_organizations/"):
+            return FakeResp(200, [{"id": 5, "name": "StagAI", "url": ""}, {"id": 6, "name": "Other", "url": ""}])
         return FakeResp(200, {"status": "Finished", "scores": [{"column_key": "overall_accuracy", "score": "0.5"}]})
 
 
@@ -82,3 +86,17 @@ def test_submit_follows_the_web_client(tmp_path, monkeypatch):
     assert sub[1].endswith("/api/submissions/") and sub[2] == {"data": "k1", "phase": 30831, "tasks": [36510]}
     rec = c.wait(77, sleep=lambda s: None)
     assert codabench.scores(rec) == {"overall_accuracy": 0.5}
+
+
+def test_submit_as_organization(tmp_path, monkeypatch):
+    s = FakeSession()
+    monkeypatch.setattr(codabench.requests, "put", lambda url, data, headers, timeout: FakeResp())
+    c = codabench.Client.login("u", "p", session=s)
+    z = tmp_path / "run1.zip"
+    z.write_bytes(b"PK")
+    assert c.organization_id("StagAI") == 5
+    c.submit(z, 18274, 30831, [36510], organization=5)
+    assert s.calls[-1][2] == {"data": "k1", "phase": 30831, "tasks": [36510], "organization": 5}
+    with pytest.raises(codabench.CodabenchError, match="not found") as err:
+        c.organization_id("stagai")  # exact name only: never guess which team gets the score
+    assert "Other" not in str(err.value)  # other memberships stay out of the public status page

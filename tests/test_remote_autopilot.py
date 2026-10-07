@@ -8,6 +8,7 @@ import pytest
 from reva import autopilot, package, remote
 from tests.conftest import make_rows
 from reva import config as C
+from reva.codabench import CodabenchError
 from reva.kaggle import Push
 
 NOW = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.timezone.utc)
@@ -121,15 +122,22 @@ class FakeKaggle:
 
 
 class FakeClient:
-    def __init__(self, status="Finished", can=True):
+    def __init__(self, status="Finished", can=True, orgs=None):
         self.submitted, self.status, self.can = [], status, can
+        self.orgs, self.organizations = {"StagAI": 5} if orgs is None else orgs, []
+
+    def organization_id(self, name):
+        if name not in self.orgs:
+            raise CodabenchError(f"organization {name!r} not found for this account")
+        return self.orgs[name]
 
     def can_submit(self, phase):
         return self.can, "" if self.can else "User not approved to participate in this competition"
 
-    def submit(self, zip_path, comp, phase, tasks):
+    def submit(self, zip_path, comp, phase, tasks, organization=None):
         assert Path(zip_path).exists()
         self.submitted.append(zip_path)
+        self.organizations.append(organization)
         return 99 + len(self.submitted)
 
     def wait(self, sid, timeout_s=0):
@@ -162,6 +170,7 @@ def test_cycle_push_collect_submit(tmp_path):
                           fetch_board=board_rows)
     assert len(out["collected"]) == 2 and not out["needs_fix"]
     assert len(client.submitted) == 1 and out["submitted"][0]["scores"] == {"overall_accuracy": 0.62}
+    assert client.organizations == [5] and out["submitted"][0]["organization"] == "StagAI"
     assert package.validate(client.submitted[0], TEST, "fill_test") == len(TEST)  # rebuilt from test_probs
     assert out["pushed"]["runs"][0].startswith("ft-4b-")  # the next lane went out
     jobs = [json.loads(x) for x in (state / "jobs.jsonl").read_text().splitlines()]
@@ -224,6 +233,23 @@ def test_cycle_falls_back_to_the_next_format_and_reports_refusals(tmp_path):
                           now=NOW + dt.timedelta(hours=3), fetch_board=board_rows, push=False)
     assert out["submitted"][0]["format"] == "id_map" and out["submitted"][0]["status"] == "Finished"
     assert package.validate(ok.submitted[0], TEST, "id_map") == len(TEST)
+
+
+def test_unknown_organization_blocks_the_submission(tmp_path):
+    c, state, work = cfg(), tmp_path / "state", tmp_path / "work"
+    seed_annotations(work)
+    k = FakeKaggle()
+    autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
+    k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
+    outsider = FakeClient(orgs={})
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=outsider, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=1), fetch_board=board_rows, push=False)
+    assert not outsider.submitted and "StagAI" in out["submit_error"]
+    personal = FakeClient()
+    out = autopilot.cycle(C.override(c, {"competition.organization": ""}), QUEUE, state, work, k, "sha1", "me",
+                          client=personal, auto_submit=True, now=NOW + dt.timedelta(hours=2),
+                          fetch_board=board_rows, push=False)
+    assert personal.organizations == [None]
 
 
 def test_caller_notes_reach_status(tmp_path):
