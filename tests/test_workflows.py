@@ -60,4 +60,15 @@ def test_autopilot_chains_itself_while_waiting():
     assert last["if"] == "always()" and "waiting" in last["run"]
     # the dispatch must not depend on a checked-out repo: an always() step runs after a failed checkout
     assert "gh workflow run autopilot.yml --ref main --repo \"$GITHUB_REPOSITORY\"" in last["run"]
-    assert d["jobs"]["cycle"]["timeout-minutes"] > 20 + 10  # the wait plus a cycle fits
+    assert d["jobs"]["cycle"]["timeout-minutes"] > 20 + 8 + 10  # the wait, the retries and a cycle fit
+
+
+def test_next_cycle_dispatch_is_retried():
+    # GitHub answered one dispatch with HTTP 500 and the loop stopped (run 56, 7 Oct 2026)
+    import re
+
+    d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
+    run = d["jobs"]["cycle"]["steps"][-1]["run"]
+    waits = re.search(r"for wait in ([\d ]+); do", run)
+    assert waits and len(waits.group(1).split()) >= 3
+    assert "&& exit 0" in run and run.rstrip().endswith("exit 1")  # a dispatch that never lands fails loudly
