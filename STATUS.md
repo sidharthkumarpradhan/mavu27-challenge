@@ -1,7 +1,7 @@
-# ReVA autopilot status (2026-10-07T00:47:28Z)
+# ReVA autopilot status (2026-10-07T01:08:23Z)
 
 - Codabench login ok; account may submit; submits as StagAI (id 2763)
-- leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
+- leaderboard: 6 rows, 1 new; leader mkhlystun 0.8735
 - job sidharthkumarpradhan/reva-zs-4b-6254e8de is running
 
 ## Leaderboard (top 8)
@@ -12,7 +12,7 @@
 | 2 | h | 0.8620 |
 | 3 | amirmazaheri | 0.8313 |
 | 4 | minh_leduc | 0.8257 |
-| 5 | Hoang Bui | 0.6725 |
+| 5 | Hoang Bui | 0.6793 |
 | 6 | chrisathy | 0.2515 |
 
 ## Runs (newest first)
