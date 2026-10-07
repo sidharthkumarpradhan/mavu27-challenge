@@ -1,13 +1,19 @@
-# ReVA autopilot status (2026-10-07T01:49:21Z)
+# ReVA autopilot status (2026-10-07T02:09:52Z)
 
 - Codabench login ok; account may submit; submits as StagAI (id 2763)
-- leaderboard fetch failed: 500 Server Error: Internal Server Error for url: https://www.codabench.org/api/phases/30831/get_leaderboard/
+- leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
 - job sidharthkumarpradhan/reva-zs-4b-6254e8de is running
 
 ## Leaderboard (top 8)
 
 | # | owner | overall |
 |---|---|---|
+| 1 | mkhlystun | 0.8735 |
+| 2 | h | 0.8620 |
+| 3 | amirmazaheri | 0.8313 |
+| 4 | minh_leduc | 0.8257 |
+| 5 | Hoang Bui | 0.6793 |
+| 6 | chrisathy | 0.2515 |
 
 ## Runs (newest first)
 
