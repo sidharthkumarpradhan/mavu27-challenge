@@ -28,6 +28,26 @@ def test_run_ids_follow_config():
     assert a["run_id"] != b["run_id"]
 
 
+def test_run_ids_ignore_orchestration_settings():
+    # regression: adding competition.organization re-queued the finished baseline under a new id
+    a = remote.run_config(cfg(), QUEUE[0])
+    for key, value in [("competition.organization", "Other"), ("remote.pip", ["av>=15"]), ("submit.min_gain", 0.01)]:
+        assert remote.run_config(C.override(cfg(), {key: value}), QUEUE[0])["run_id"] == a["run_id"]
+    assert remote.run_config(C.override(cfg(), {"frames.max_side": 320}), QUEUE[0])["run_id"] != a["run_id"]
+
+
+def test_pending_skips_entries_done_under_an_older_id():
+    queue = [{**QUEUE[0], "done_as": ["zs-4b-6254e8de"]}, *QUEUE[1:]]
+    left = remote.pending(cfg(), queue, done={"zs-4b-6254e8de"}, failed={})
+    assert [c["run_id"].rsplit("-", 1)[0] for c in left] == ["text-4b", "ft-4b"]
+
+
+def test_shipped_queue_does_not_repeat_the_first_job():
+    done = {"zs-4b-6254e8de", "text-4b-f571bdb5"}
+    names = [c["run_id"].rsplit("-", 1)[0] for c in remote.pending(cfg(), remote.load_queue("configs/queue.yaml"), done, {})]
+    assert "zs-4b" not in names and "text-4b" not in names
+
+
 def test_pending_skips_done_and_repeat_failures():
     ids = [remote.run_config(cfg(), q)["run_id"] for q in QUEUE]
     left = remote.pending(cfg(), QUEUE, done={ids[0]}, failed={ids[1]: 2})

@@ -56,3 +56,14 @@ def parse_pairs(items: list[str]) -> dict[str, str]:
 def fingerprint(cfg: dict[str, Any]) -> str:
     """Short stable hash of a config. The run id, so the same experiment is never run twice."""
     return hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+# Sections that only steer the pipeline: where we submit, how the GPU job is launched. Changing
+# them does not change what a run predicts, so they stay out of the run id. Without this, adding
+# the Codabench organization queued the finished baseline again as a new run.
+ORCHESTRATION = ("competition", "submit", "remote")
+
+
+def experiment_fingerprint(cfg: dict[str, Any]) -> str:
+    """Fingerprint of the parts of a config that change a run's predictions."""
+    return fingerprint({k: v for k, v in cfg.items() if k not in ORCHESTRATION})
