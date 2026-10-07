@@ -37,16 +37,20 @@ def run_config(base: dict, item: dict) -> dict:
     """Defaults plus the item's overrides, with a run id that changes whenever the config does."""
     cfg = C.override(base, {k: v for k, v in item["set"].items()})
     cfg.pop("run_id", None)
-    cfg["run_id"] = f"{item['name']}-{C.fingerprint(cfg)[:8]}"
+    cfg["run_id"] = f"{item['name']}-{C.experiment_fingerprint(cfg)[:8]}"
     cfg["why"] = item.get("why", "")
     return cfg
 
 
 def pending(base: dict, queue: list[dict], done: set[str], failed: dict[str, int], max_fail: int = 2) -> list[dict]:
-    """Queue order, skipping runs already finished or failed max_fail times."""
+    """Queue order, skipping runs already finished or failed max_fail times. An entry's `done_as`
+    maps its current run id to an older id of the same experiment (made before the run id left out
+    orchestration). The alias stops matching as soon as the entry's experiment changes."""
     out = []
     for item in queue:
         cfg = run_config(base, item)
+        if (item.get("done_as") or {}).get(cfg["run_id"]) in done:
+            continue
         if cfg["run_id"] not in done and failed.get(cfg["run_id"], 0) < max_fail:
             out.append(cfg)
     return out

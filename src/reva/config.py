@@ -56,3 +56,24 @@ def parse_pairs(items: list[str]) -> dict[str, str]:
 def fingerprint(cfg: dict[str, Any]) -> str:
     """Short stable hash of a config. The run id, so the same experiment is never run twice."""
     return hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+# Keys that only steer the pipeline: where we submit, how the GPU job is scheduled. Changing them
+# does not change what a run predicts, so they stay out of the run id. Without this, adding the
+# Codabench organization queued the finished baseline again as a new run. remote.pip and
+# remote.accelerator stay in: package versions and the GPU can change the outputs.
+ORCHESTRATION = ("competition", "submit", "remote.kernel", "remote.lanes", "remote.max_hours",
+                 "remote.weekly_gpu_hours", "remote.repo")
+
+
+def experiment_fingerprint(cfg: dict[str, Any]) -> str:
+    """Fingerprint of the parts of a config that change a run's predictions."""
+    cfg = copy.deepcopy(cfg)
+    for dotted in ORCHESTRATION:
+        *parents, leaf = dotted.split(".")
+        node = cfg
+        for key in parents:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict):
+            node.pop(leaf, None)
+    return fingerprint(cfg)
