@@ -72,3 +72,12 @@ def test_next_cycle_dispatch_is_retried():
     waits = re.search(r"for wait in ([\d ]+); do", run)
     assert waits and len(waits.group(1).split()) >= 3
     assert "&& exit 0" in run and run.rstrip().endswith("exit 1")  # a dispatch that never lands fails loudly
+
+
+def test_autopilot_gets_both_kaggle_accounts():
+    # reva.kaggle.from_env reads these; a secret missing from the job env leaves the account unused
+    from reva.kaggle import ACCOUNT_VARS
+
+    env = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())["jobs"]["cycle"]["env"]
+    for user, key in ACCOUNT_VARS:
+        assert env[user] == f"${{{{ secrets.{user} }}}}" and env[key] == f"${{{{ secrets.{key} }}}}"

@@ -115,6 +115,16 @@ From the Codabench pages (read in full 6 Oct 2026):
   this group"). If an organization is set again and the account cannot submit for it, the loop
   submits nothing.
 
+## GPU accounts
+
+- Two Kaggle accounts (owner, 7 Oct 2026: "if the first one has exhaustion of quota, then we will use
+  the 2nd one"). Secrets `KAGGLE_USERNAME`/`KAGGLE_KEY`, then `KAGGLE_USERNAME_NEW`/`KAGGLE_KEY_NEW`.
+  A job goes to the first account with quota left; GPU pacing counts each account apart; every call
+  on a kernel uses its owner's credentials (`reva.kaggle.Accounts`).
+- The agent flagged that Kaggle allows one account per person, so a second account for more GPU
+  quota risks a ban of both accounts and their private kernel outputs. The owner accepted that risk.
+  Codabench is unaffected: we still submit from the one Codabench account.
+
 ## Verified facts (6 Oct 2026)
 
 See `docs/research.md` for sources. Key ones:

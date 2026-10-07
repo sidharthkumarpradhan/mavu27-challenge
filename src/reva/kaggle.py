@@ -39,12 +39,34 @@ class KaggleTimeout(KaggleError):
     pass
 
 
-def subprocess_runner(cmd: list[str]) -> tuple[int, str]:
+def subprocess_runner(cmd: list[str], env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Run the CLI. `env` replaces the process environment (see account_env), else it is inherited."""
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                           # PYTHONUTF8: the CLI writes <slug>.log with open()'s default encoding, which is
                           # cp1252 on Windows and crashed `kernels output` on the first real job (3 Oct 2026)
-                          env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+                          env={**(os.environ if env is None else env), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+# Secret pairs in priority order. The second account takes over when the first one's weekly GPU quota
+# is used up (owner's call, 7 Oct 2026).
+ACCOUNT_VARS = [("KAGGLE_USERNAME", "KAGGLE_KEY"), ("KAGGLE_USERNAME_NEW", "KAGGLE_KEY_NEW")]
+CRED_VARS = ("KAGGLE_API_TOKEN", "KAGGLE_USERNAME", "KAGGLE_KEY", "KAGGLE_CONFIG_DIR")
+
+
+def account_env(user: str, key: str, home: Path, base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for a CLI call as one account. The CLI tries KAGGLE_API_TOKEN, then
+    ~/.kaggle/access_token, then the username and key (kaggle 2.2.4, KaggleApi.authenticate), so a
+    token left by another account would win. A fresh HOME and config dir per account rule that out."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if k not in CRED_VARS}
+    home.mkdir(parents=True, exist_ok=True)
+    env.update(HOME=str(home), KAGGLE_CONFIG_DIR=str(home / ".kaggle"))
+    key = "".join(key.split())
+    if key.startswith("KGAT"):  # the new access token format; the classic key is 32 hex chars
+        env["KAGGLE_API_TOKEN"] = key
+    else:
+        env.update(KAGGLE_USERNAME=user.strip(), KAGGLE_KEY=key)
+    return env
 
 
 @dataclass(frozen=True)
@@ -98,10 +120,12 @@ def kernel_metadata(slug: str, code_file: str, *, gpu: bool, accelerator: str | 
 
 
 class Kaggle:
-    def __init__(self, cli: list[str] | None = None, runner: Runner = subprocess_runner,
-                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, cli: list[str] | None = None, runner: Runner | None = None,
+                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+                 env: dict[str, str] | None = None):
         self.cli = cli or [sys.executable, "-m", "kaggle"]
-        self.runner, self.sleep, self.clock = runner, sleep, clock
+        self.runner = runner or (lambda cmd: subprocess_runner(cmd, env))
+        self.sleep, self.clock = sleep, clock
 
     def _run(self, *args: str, check: bool = True) -> str:
         code, out = self.runner([*self.cli, *args])
@@ -147,3 +171,51 @@ class Kaggle:
 
     def logs(self, slug: str) -> str:
         return log_text(self._run("kernels", "logs", slug, check=False))
+
+
+def owner(slug: str) -> str:
+    return slug.split("/", 1)[0].lower()
+
+
+class Accounts:
+    """Several Kaggle accounts behind the Kaggle interface. A call on a kernel goes to the account
+    that owns it: a private kernel's status and outputs are visible to its owner only."""
+
+    def __init__(self, clients: dict[str, Kaggle]):
+        if not clients:
+            raise KaggleError("no Kaggle account configured")
+        self.clients = {u.lower(): k for u, k in clients.items()}
+        self.users = list(self.clients)  # priority order
+
+    def _for(self, slug: str) -> Kaggle:
+        if owner(slug) not in self.clients:
+            raise KaggleError(f"no credentials for the owner of {slug}")
+        return self.clients[owner(slug)]
+
+    def push(self, kernel_dir: Path, timeout_s: int | None = None, accelerator: str | None = None) -> Push:
+        slug = json.loads((Path(kernel_dir) / "kernel-metadata.json").read_text())["id"]
+        return self._for(slug).push(kernel_dir, timeout_s, accelerator)
+
+    def status(self, slug: str) -> tuple[str, str]:
+        return self._for(slug).status(slug)
+
+    def wait(self, slug: str, *args, **kwargs) -> tuple[str, str]:
+        return self._for(slug).wait(slug, *args, **kwargs)
+
+    def output(self, slug: str, dest: Path, file_pattern: str | None = None) -> tuple[list[Path], str]:
+        return self._for(slug).output(slug, dest, file_pattern)
+
+    def logs(self, slug: str) -> str:
+        return self._for(slug).logs(slug)
+
+
+def from_env(home_root: str | Path | None = None, environ: dict[str, str] | None = None) -> Accounts | Kaggle:
+    """Every account whose secrets are set (ACCOUNT_VARS), or the CLI's own login when none is."""
+    environ = os.environ if environ is None else environ
+    root = Path(home_root or Path.home() / ".reva-kaggle")
+    clients = {}
+    for i, (uvar, kvar) in enumerate(ACCOUNT_VARS):
+        user, key = environ.get(uvar, "").strip(), environ.get(kvar, "").strip()
+        if user and key and user.lower() not in clients:
+            clients[user.lower()] = Kaggle(env=account_env(user, key, root / str(i), environ))
+    return Accounts(clients) if clients else Kaggle()

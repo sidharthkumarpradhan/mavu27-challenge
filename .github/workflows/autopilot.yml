@@ -6,7 +6,8 @@
 # and variables > Actions > Variables:
 #   AUTOPILOT=off      stops the loop
 #   AUTO_SUBMIT=off    keeps the loop running but stops Codabench submissions
-# Secrets: KAGGLE_USERNAME, KAGGLE_KEY (GPU jobs), CODABENCH_USERNAME, CODABENCH_PASSWORD
+# Secrets: KAGGLE_USERNAME, KAGGLE_KEY (GPU jobs), optional KAGGLE_USERNAME_NEW, KAGGLE_KEY_NEW (second
+# Kaggle account, takes jobs when the first is out of weekly GPU quota), CODABENCH_USERNAME, CODABENCH_PASSWORD
 # (submissions and scores). Optional: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN turns on the
 # headless Claude Code fixer for failed jobs, as in the EURS loop.
 # Scheduled runs fire from the default branch; the job always checks out main.
@@ -40,6 +41,8 @@ jobs:
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_USERNAME_NEW: ${{ secrets.KAGGLE_USERNAME_NEW }}  # second account, used when the first is out of GPU quota
+      KAGGLE_KEY_NEW: ${{ secrets.KAGGLE_KEY_NEW }}
       CODABENCH_USERNAME: ${{ secrets.CODABENCH_USERNAME }}
       CODABENCH_PASSWORD: ${{ secrets.CODABENCH_PASSWORD }}
       AUTO_SUBMIT: ${{ vars.AUTO_SUBMIT }}
