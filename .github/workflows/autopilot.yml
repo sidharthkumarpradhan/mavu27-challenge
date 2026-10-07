@@ -1,4 +1,4 @@
-# Unattended ReVA loop. Every hour: leaderboard snapshot, poll open submissions, collect a finished
+# Unattended ReVA loop. Twice an hour: leaderboard snapshot, poll open submissions, collect a finished
 # Kaggle job, submit the best gated run, push the next queued lanes, update STATUS.md on the
 # `state` branch. See src/reva/autopilot.py.
 #
@@ -14,7 +14,7 @@ name: autopilot
 
 on:
   schedule:
-    - cron: "23 * * * *"
+    - cron: "23,53 * * * *"  # off the top of the hour, when GitHub delays scheduled runs most
   push:  # a merged code, config or queue change starts a cycle at once instead of at the next hour
     branches: [main]
     paths: ["configs/**", "src/**", ".github/workflows/autopilot.yml"]

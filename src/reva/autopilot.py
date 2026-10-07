@@ -1,4 +1,4 @@
-"""One unattended cycle. GitHub Actions runs it every hour (.github/workflows/autopilot.yml).
+"""One unattended cycle. GitHub Actions runs it twice an hour (.github/workflows/autopilot.yml).
 
     board snapshot -> poll open submissions -> collect a finished Kaggle job -> gated submit
     -> push the next queued lanes -> write STATUS.md
