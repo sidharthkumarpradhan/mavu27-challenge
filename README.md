@@ -46,7 +46,9 @@ python -m reva.cli submit --run <run_id> --state state/      # owner-triggered s
 
 ## Automation
 
-`.github/workflows/autopilot.yml` runs twice an hour on the default branch:
+`.github/workflows/autopilot.yml` runs twice an hour on the default branch, on every merged
+code or config change, and, while a Kaggle job or a submission is open, about 20 minutes after
+the last cycle (each cycle starts the next):
 
 1. Snapshot the leaderboard.
 2. Poll open submissions.

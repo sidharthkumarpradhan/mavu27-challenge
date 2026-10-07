@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reva import autopilot, package, remote
+from reva import autopilot, package, registry, remote
 from reva import config as C
 from reva.codabench import CodabenchError
 from reva.kaggle import Push
@@ -173,6 +173,7 @@ def test_cycle_push_collect_submit(tmp_path):
     k = FakeKaggle()
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
     assert out["pushed"] and len(out["pushed"]["runs"]) == 2 and k.pushed
+    assert out["waiting"]  # the job runs on, so the workflow keeps cycling
     assert (state / "active.json").exists() and "leader" in (state / "STATUS.md").read_text()
 
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
@@ -194,6 +195,18 @@ def test_cycle_push_collect_submit(tmp_path):
     assert jobs[0]["hours"] == 3.0
     status = (state / "STATUS.md").read_text()
     assert "Calibration" in status and "Gap to the leader" in status
+
+
+def test_cycle_waits_only_while_something_is_open(tmp_path):
+    # GitHub never fired the cron (7 Oct 2026), so the workflow chains cycles while this is true
+    state, work = tmp_path / "state", tmp_path / "work"
+    out = autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", now=NOW, fetch_board=board_rows,
+                          push=False)
+    assert out["waiting"] is False
+    registry.append(state / "submissions.jsonl", sub_row("zs-4b-x", 0.6, status="Running"))
+    out = autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", now=NOW, fetch_board=board_rows,
+                          push=False)
+    assert out["waiting"] is True
 
 
 def test_cycle_failed_lanes_flag_a_fix_and_never_submit(tmp_path):
