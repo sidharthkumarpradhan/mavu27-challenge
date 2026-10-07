@@ -50,6 +50,10 @@ These engineering and branch rules apply to every project, not only this one.
 Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - The owner decides. The agent prepares. Irreversible or outward-facing steps need the owner's OK,
   unless the owner has switched on the automated path for them. Submissions are on that path.
+- Merging is on that path too (owner, 7 Oct 2026: "you have the complete control, as long as
+  everything adheres to guidelines, please merge it, don't wait for me"). The agent merges its
+  own PRs once CI is green on the latest commit, every review finding is handled, and the change
+  follows the compliance rules below. Anything that touches compliance is the owner's call.
 - Compliance before score. Evidence over intuition. Every number has a source and a date.
 - Measure before building. Find the largest (test weight x gap to leader) and work only that.
 - Ceilings before architecture. Run an oracle or probe before a big build.
