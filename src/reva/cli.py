@@ -78,7 +78,7 @@ def cmd_autopilot(a) -> int:
             can, why = client.can_submit(C.get(cfg, "competition.phase"))
             login += "; account may submit" if can else f"; Codabench refuses submissions: {why}"
     except Exception as e:  # a bad login must not stop the GPU side of the loop
-        client, login = None, f"Codabench login failed: {e}"
+        client, login = None, f"Codabench login failed: {autopilot.public(e)}"  # STATUS.md is public
     if client and (org := C.get(cfg, "competition.organization")):
         try:
             login += f"; submits as {org} (id {client.organization_id(org)})"

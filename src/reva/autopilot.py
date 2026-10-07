@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import traceback
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from reva import config as C
 from reva.codabench import DONE, FAILED, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
 from reva.kaggle import FAILED as K_FAILED
+from reva.kaggle import KaggleError
 from reva.kaggle import tail
 
 TEST_COUNTS = {"General Understanding": 180, "Object and Land Cover Recognition": 660, "Change Detection": 500,
@@ -54,6 +56,15 @@ def latest_submissions(rows: list[dict]) -> list[dict]:
 def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7) -> float:
     since = now - dt.timedelta(days=days)
     return sum(j.get("hours", 0) for j in jobs if parse_iso(j["collected"]) >= since)
+
+
+def public(e: Exception) -> str:
+    """Error text that is safe for STATUS.md, which is public. Codabench errors end with the
+    response body after the status code, e.g. "submission create failed (400): {...}". Keep the
+    part up to the status code and drop the body."""
+    text = str(e)
+    m = re.match(r"(.*?\(\d{3}\))", text, re.S)
+    return m.group(1) if m else text
 
 
 def pick_format(subs: list[dict], cfg: dict) -> str | None:
@@ -236,7 +247,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                      f"{rows[0].get('overall_accuracy', 0):.4f}" if rows else "leaderboard empty")
     except Exception as e:  # the board is information, never a reason to stop the loop
         rows = []
-        notes.append(f"leaderboard fetch failed: {e}")
+        notes.append(f"leaderboard fetch failed: {public(e)}")
 
     # 2. open submissions
     subs = latest_submissions(registry.read(state / "submissions.jsonl"))
@@ -246,7 +257,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 try:
                     rec = client.submission(s["submission_id"])
                 except CodabenchError as e:
-                    notes.append(f"could not poll submission {s['submission_id']}: {e}")
+                    notes.append(f"could not poll submission {s['submission_id']}: {public(e)}")
                     continue
                 if rec.get("status") != s["status"]:
                     registry.append(state / "submissions.jsonl", {**s, "status": rec.get("status"), "scores": scores(rec)})
@@ -330,8 +341,8 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 out["submitted"].append(row)
                 notes.append(f"submitted {r['run_id']} as {sid} ({fmt}): {why}; status {row['status']}")
             except CodabenchError as e:
-                out["submit_error"] = str(e)
-                notes.append(f"submission of {r['run_id']} not made: {e}")
+                out["submit_error"] = public(e)
+                notes.append(f"submission of {r['run_id']} not made: {public(e)}")
 
     # 5. push the next lanes
     subs = latest_submissions(registry.read(state / "submissions.jsonl"))  # include this cycle's submission
@@ -352,17 +363,27 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         else:
             kdir = work / "kernel"
             slug = remote.build(cfg, lanes, sha, kdir, kaggle_user)
-            pushed = kaggle.push(kdir, timeout_s=int(3600 * C.get(cfg, "remote.max_hours")),
-                                 accelerator=C.get(cfg, "remote.accelerator"))
-            active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
-                      "url": pushed.url}
-            active_path.write_text(json.dumps(active, indent=1))
-            out["pushed"] = active
-            notes.append(f"pushed {slug} with {active['runs']}")
+            try:
+                pushed = kaggle.push(kdir, timeout_s=int(3600 * C.get(cfg, "remote.max_hours")),
+                                     accelerator=C.get(cfg, "remote.accelerator"))
+            except KaggleError as e:
+                # The weekly GPU quota (hit on 7 Oct 2026) clears by itself, so keep the loop alive and
+                # retry each cycle. Any other refusal (credentials, metadata) needs a fix: fail loudly.
+                if "gpu quota" not in str(e).lower():
+                    raise
+                out["push_refused"] = True
+                notes.append("Kaggle weekly GPU quota reached; the next job waits for it to reset")
+            else:
+                active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
+                          "url": pushed.url}
+                active_path.write_text(json.dumps(active, indent=1))
+                out["pushed"] = active
+                notes.append(f"pushed {slug} with {active['runs']}")
 
     # something will change without a push: a Kaggle job still running or a submission still being
     # scored. The workflow starts the next cycle itself while this holds.
-    out["waiting"] = bool(active) or any(s["status"] not in DONE | FAILED for s in subs)
+    # A refused push also counts: nothing else would start the loop again once the quota resets.
+    out["waiting"] = bool(active) or out.get("push_refused", False) or any(s["status"] not in DONE | FAILED for s in subs)
     (state / "STATUS.md").write_text(status_md(cfg, rows, runs, subs, active, jobs, now, notes))
     out["notes"] = notes
     return out
