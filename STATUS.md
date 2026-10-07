@@ -1,7 +1,7 @@
-# ReVA autopilot status (2026-10-07T12:09:05Z)
+# ReVA autopilot status (2026-10-07T12:29:32Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 7 rows, 1 new; leader mkhlystun 0.8735
+- leaderboard: 7 rows, 0 new; leader mkhlystun 0.8735
 - Kaggle weekly GPU quota reached; the next job waits for it to reset
 
 ## Leaderboard (top 8)
