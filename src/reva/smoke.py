@@ -14,6 +14,7 @@ import argparse
 import json
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -62,7 +63,8 @@ def synthetic(root: Path) -> None:
         return out
 
     for split, n in (("train", 2), ("val", 1), ("test", 1)):
-        (root / f"{split}.json").write_text(json.dumps({"metadata": {}, "QA": rows(split, n)}))
+        qa = rows(split, n)
+        (root / f"{split}.json").write_text(json.dumps({"metadata": {"total_questions": len(qa)}, "QA": qa}))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     missing = [n for n in need if not (out / "run" / n).exists()]
     if missing:
         print(f"NOT READY: missing {missing}")
+        return 1
+    with zipfile.ZipFile(out / "run" / "smoke.zip") as z:  # the zip must keep test.json's own metadata
+        meta = json.loads(z.read("predictions.json"))["metadata"]
+    if meta != json.loads((out / "data" / "test.json").read_text())["metadata"]:
+        print(f"NOT READY: zip metadata {meta} differs from test.json")
         return 1
     print("DEV", json.dumps(result["metrics"]))
     print("READY")

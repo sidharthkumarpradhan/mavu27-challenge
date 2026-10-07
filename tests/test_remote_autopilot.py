@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,7 @@ def test_gate_rules():
 
 
 TEST = make_rows("test", 1)
+TEST_META = {"generated_at": "2026-04-25", "total_questions": len(TEST)}
 
 
 def seed_annotations(work: Path) -> None:
@@ -92,7 +94,7 @@ def seed_annotations(work: Path) -> None:
     ann = work / "annotations"
     ann.mkdir(parents=True, exist_ok=True)
     for split, rows in (("train", make_rows("train", 1)), ("val", make_rows("val", 1)), ("test", TEST)):
-        (ann / f"{split}.json").write_text(json.dumps({"metadata": {}, "QA": rows}))
+        (ann / f"{split}.json").write_text(json.dumps({"metadata": TEST_META, "QA": rows}))
 
 
 class FakeKaggle:
@@ -172,6 +174,8 @@ def test_cycle_push_collect_submit(tmp_path):
     assert len(client.submitted) == 1 and out["submitted"][0]["scores"] == {"overall_accuracy": 0.62}
     assert client.organizations == [5] and out["submitted"][0]["organization"] == "StagAI"
     assert package.validate(client.submitted[0], TEST, "fill_test") == len(TEST)  # rebuilt from test_probs
+    with zipfile.ZipFile(client.submitted[0]) as z:  # same layout as test.json, metadata included
+        assert json.loads(z.read("predictions.json"))["metadata"] == TEST_META
     assert out["pushed"]["runs"][0].startswith("ft-4b-")  # the next lane went out
     jobs = [json.loads(x) for x in (state / "jobs.jsonl").read_text().splitlines()]
     assert jobs[0]["hours"] == 3.0

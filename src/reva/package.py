@@ -6,7 +6,9 @@ every one of the 4,000 test qa_ids answered by exactly one of A, B, C or D. It s
 scoring program is not public, so the format is a config knob (`submit.format`) and the first real
 submission doubles as the format check:
 
-- fill_test: {"metadata": ..., "QA": [test rows with correct_answer set]}
+- fill_test: {"metadata": ..., "QA": [test rows with correct_answer set]}, with test.json's own
+  metadata. The hidden reference data zips to 335,929 bytes and test.json filled with answers to
+  about 336,100, so the answer key is very likely this same layout (measured 6 Oct 2026).
 - id_map:    {"test_000001": "A", ...}
 - list:      [{"qa_id": "test_000001", "answer": "A"}, ...]
 
