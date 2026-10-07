@@ -367,12 +367,12 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 pushed = kaggle.push(kdir, timeout_s=int(3600 * C.get(cfg, "remote.max_hours")),
                                      accelerator=C.get(cfg, "remote.accelerator"))
             except KaggleError as e:
-                # Kaggle refused the job (on 7 Oct 2026: the weekly GPU quota). Keep the loop alive and
-                # retry each cycle. The full error goes to the Actions log; STATUS.md gets a fixed note.
-                traceback.print_exc()
+                # The weekly GPU quota (hit on 7 Oct 2026) clears by itself, so keep the loop alive and
+                # retry each cycle. Any other refusal (credentials, metadata) needs a fix: fail loudly.
+                if "gpu quota" not in str(e).lower():
+                    raise
                 out["push_refused"] = True
-                notes.append("Kaggle weekly GPU quota reached; next job waits for it to reset" if "quota" in str(e).lower()
-                             else f"Kaggle refused the next job ({type(e).__name__}); retrying next cycle")
+                notes.append("Kaggle weekly GPU quota reached; the next job waits for it to reset")
             else:
                 active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
                           "url": pushed.url}

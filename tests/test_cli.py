@@ -25,6 +25,24 @@ def test_failed_organization_lookup_keeps_error_text_out_of_status(tmp_path, mon
     assert "OtherTeam" not in note and "500" not in note  # STATUS.md is public
 
 
+class LeakyLogin(LeakyClient):
+    def can_submit(self, phase):
+        raise CodabenchError("phase failed (502): <html>OtherTeam secret page</html>")
+
+
+def test_failed_login_check_keeps_the_response_body_out_of_status(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_cycle(*args, notes=None, **kw):
+        seen["notes"] = notes
+        return {"notes": notes}
+
+    monkeypatch.setattr(cli, "_client", lambda cfg: LeakyLogin())
+    monkeypatch.setattr(autopilot, "cycle", fake_cycle)
+    assert cli.main(["autopilot", "--state", str(tmp_path / "s"), "--work", str(tmp_path / "w"), "--sha", "x"]) == 0
+    assert seen["notes"][0] == "Codabench login failed: phase failed (502)"
+
+
 def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
     import json
 

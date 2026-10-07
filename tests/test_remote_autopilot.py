@@ -249,6 +249,17 @@ def test_cycle_survives_a_refused_push_and_keeps_cycling(tmp_path):
     assert "GPU quota reached" in (state / "STATUS.md").read_text()
 
 
+class BrokenKaggle(FakeKaggle):
+    def push(self, kdir, timeout_s=None, accelerator=None):
+        raise KaggleError("kernel push failed: Invalid credentials")
+
+
+def test_cycle_fails_loudly_on_other_push_errors(tmp_path):
+    with pytest.raises(KaggleError):
+        autopilot.cycle(cfg(), QUEUE, tmp_path / "s", tmp_path / "w", BrokenKaggle(), "sha", "me", now=NOW,
+                        fetch_board=board_rows)
+
+
 def test_public_notes_drop_response_bodies():
     # STATUS.md is public; Codabench error text carries the response body after the status code
     e = CodabenchError('submission create failed (400): {"detail": "body"}')
