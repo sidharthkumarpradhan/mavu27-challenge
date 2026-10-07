@@ -100,3 +100,43 @@ def test_submit_as_organization(tmp_path, monkeypatch):
     with pytest.raises(codabench.CodabenchError, match="not found") as err:
         c.organization_id("stagai")  # exact name only: never guess which team gets the score
     assert "Other" not in str(err.value)  # other memberships stay out of the public status page
+
+
+class RefusingSession(FakeSession):
+    def post(self, url, json=None, data=None, timeout=None):
+        if url.endswith("/api/submissions/"):
+            return FakeResp(400, ["You do not have participant permissions for this group"])
+        return super().post(url, json, data, timeout)
+
+
+def test_a_refused_submission_names_a_known_reason(tmp_path, monkeypatch):
+    # 7 Oct 2026: "submission create failed (400)" with the body kept out of public STATUS.md told us
+    # nothing. Codabench's own fixed messages name the cause and are safe to show.
+    from reva import autopilot
+
+    monkeypatch.setattr(codabench.requests, "put", lambda url, data, headers, timeout: FakeResp())
+    c = codabench.Client.login("u", "p", session=RefusingSession())
+    z = tmp_path / "run1.zip"
+    z.write_bytes(b"PK")
+    with pytest.raises(codabench.CodabenchError) as err:
+        c.submit(z, 18274, 30831, [36510], organization=5)
+    assert autopilot.public(err.value) == \
+        "submission create failed (400): You do not have participant permissions for this group"
+
+
+def test_an_unknown_refusal_keeps_only_the_status_code():
+    from reva import autopilot
+
+    r = FakeResp(400, {"detail": "OtherTeam secret page"})
+    with pytest.raises(codabench.CodabenchError) as err:
+        codabench.Client("t", session=FakeSession())._ok(r, "submission create")
+    assert err.value.reason is None and autopilot.public(err.value) == "submission create failed (400)"
+
+
+def test_only_a_known_reason_reaches_the_public_note():
+    from reva import autopilot
+
+    class Other(Exception):
+        reason = "OtherTeam secret page"
+
+    assert autopilot.public(Other("lookup failed (500): body")) == "lookup failed (500)"

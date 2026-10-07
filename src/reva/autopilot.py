@@ -25,7 +25,7 @@ from pathlib import Path
 
 from reva import arena, board, data, package, preflight, registry, remote
 from reva import config as C
-from reva.codabench import DONE, FAILED, CodabenchError, scores
+from reva.codabench import DONE, FAILED, KNOWN_REASONS, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
 from reva.kaggle import FAILED as K_FAILED
 from reva.kaggle import KaggleError
@@ -61,10 +61,13 @@ def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7) -> float:
 def public(e: Exception) -> str:
     """Error text that is safe for STATUS.md, which is public. Codabench errors end with the
     response body after the status code, e.g. "submission create failed (400): {...}". Keep the
-    part up to the status code and drop the body."""
+    part up to the status code and drop the body. A known Codabench message (codabench.KNOWN_REASONS)
+    is added back, since it names the cause and carries nothing else from the response."""
     text = str(e)
     m = re.match(r"(.*?\(\d{3}\))", text, re.S)
-    return m.group(1) if m else text
+    reason = getattr(e, "reason", None)
+    known = reason in KNOWN_REASONS  # exact match only: callers also pass other exception types
+    return (m.group(1) if m else text) + (f": {reason}" if m and known else "")
 
 
 def pick_format(subs: list[dict], cfg: dict) -> str | None:
