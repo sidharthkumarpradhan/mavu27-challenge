@@ -142,4 +142,9 @@ jobs:
               || { echo "nothing open; the next push or schedule starts the loop"; exit 0; }
           fi
           sleep 1200
-          gh workflow run autopilot.yml --ref main --repo "$GITHUB_REPOSITORY"  # no checkout needed
+          # one HTTP 500 from the dispatch API broke the chain for an hour (7 Oct 2026), so retry
+          for wait in 0 30 60 120 240; do
+            sleep "$wait"
+            gh workflow run autopilot.yml --ref main --repo "$GITHUB_REPOSITORY" && exit 0  # no checkout needed
+          done
+          exit 1
