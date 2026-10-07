@@ -10,6 +10,9 @@
 # (submissions and scores). Optional: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN turns on the
 # headless Claude Code fixer for failed jobs, as in the EURS loop.
 # Scheduled runs fire from the default branch; the job always checks out main.
+# GitHub had not fired the schedule once by 7 Oct 2026, so while a Kaggle job runs or a submission
+# is being scored, each cycle starts the next one itself about 20 minutes later. A dispatch made
+# with GITHUB_TOKEN is one of the two events that may start a new run (GitHub docs).
 name: autopilot
 
 on:
@@ -25,6 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write  # the next cycle
   contents: write
   issues: write
 
@@ -128,3 +132,14 @@ jobs:
           git config user.name "Sidharth Pradhan"
           git config user.email "sidharthp@assignall.ai"
           claude -p "$(cat .github/autopilot/fix_prompt.md)" --allowedTools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode dontAsk
+
+      - name: Start the next cycle while a job or a submission is open
+        if: always()
+        run: |
+          # a cycle that crashed before writing its outcome keeps cycling, as the schedule would
+          if [ -f outcome.json ]; then
+            python -c "import json,sys; sys.exit(0 if json.load(open('outcome.json')).get('waiting') else 1)" \
+              || { echo "nothing open; the next push or schedule starts the loop"; exit 0; }
+          fi
+          sleep 1200
+          gh workflow run autopilot.yml --ref main --repo "$GITHUB_REPOSITORY"  # no checkout needed

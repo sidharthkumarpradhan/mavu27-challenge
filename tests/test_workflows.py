@@ -50,3 +50,14 @@ def test_every_state_file_is_saved():
     text = (ROOT / ".github" / "workflows" / "autopilot.yml").read_text()
     saved = set(re.search(r"for f in ([^;]+); do", text).group(1).split())
     assert named and named <= saved, named - saved
+
+
+def test_autopilot_chains_itself_while_waiting():
+    # the cron never fired (7 Oct 2026); a finished Kaggle job must not wait for a push to main
+    d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
+    assert d["permissions"]["actions"] == "write"
+    last = d["jobs"]["cycle"]["steps"][-1]
+    assert last["if"] == "always()" and "waiting" in last["run"]
+    # the dispatch must not depend on a checked-out repo: an always() step runs after a failed checkout
+    assert "gh workflow run autopilot.yml --ref main --repo \"$GITHUB_REPOSITORY\"" in last["run"]
+    assert d["jobs"]["cycle"]["timeout-minutes"] > 20 + 10  # the wait plus a cycle fits

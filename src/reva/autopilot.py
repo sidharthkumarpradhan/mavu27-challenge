@@ -225,7 +225,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     state.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
     notes = list(notes or [])  # e.g. the Codabench login result from the caller
-    out = {"collected": [], "submitted": [], "pushed": None, "needs_fix": False}
+    out = {"collected": [], "submitted": [], "pushed": None, "needs_fix": False, "waiting": False}
 
     # 1. leaderboard
     fetch_board = fetch_board or (lambda: board.fetch(C.get(cfg, "competition.phase"), C.get(cfg, "competition.base")))
@@ -360,6 +360,9 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             out["pushed"] = active
             notes.append(f"pushed {slug} with {active['runs']}")
 
+    # something will change without a push: a Kaggle job still running or a submission still being
+    # scored. The workflow starts the next cycle itself while this holds.
+    out["waiting"] = bool(active) or any(s["status"] not in DONE | FAILED for s in subs)
     (state / "STATUS.md").write_text(status_md(cfg, rows, runs, subs, active, jobs, now, notes))
     out["notes"] = notes
     return out

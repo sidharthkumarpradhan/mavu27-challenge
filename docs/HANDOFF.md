@@ -37,6 +37,9 @@ These are the first things the first job will tell us. Check its log before trus
 ## Added 7 Oct 2026
 
 - The loop runs twice an hour (:23 and :53).
+- GitHub had not fired that schedule once by 01:00Z on 7 Oct. Every cycle came from a push to
+  main. So while a Kaggle job runs or a submission is being scored, each cycle now dispatches the
+  next one about 20 minutes later. When nothing is open the chain stops and a push restarts it.
 - Pre-upload checks (`reva.preflight`) run on every rebuilt zip before it goes to Codabench.
   STATUS.md shows the next candidate's dev score with a 95% interval and a projected board score.
 - Account approved: STATUS shows "submits as StagAI (id 2763)".
