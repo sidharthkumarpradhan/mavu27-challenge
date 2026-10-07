@@ -1,6 +1,6 @@
-# ReVA autopilot status (2026-10-06T23:30:18Z)
+# ReVA autopilot status (2026-10-07T00:03:36Z)
 
-- Codabench login ok; Codabench refuses submissions: User not approved to participate in this competition
+- Codabench login ok; account may submit; submits as StagAI (id 2763)
 - leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
 - job sidharthkumarpradhan/reva-zs-4b-6254e8de is running
 
