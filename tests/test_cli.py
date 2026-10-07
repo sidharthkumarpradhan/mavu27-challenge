@@ -30,7 +30,8 @@ def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
 
     import reva.kaggle
     from reva import preflight, registry
-    from tests.test_remote_autopilot import BOARD_COLUMNS, TEST, FakeClient, FakeKaggle, probs_for, seed_annotations
+    from tests.conftest import BOARD_COLUMNS
+    from tests.test_remote_autopilot import TEST, FakeClient, FakeKaggle, probs_for, seed_annotations
 
     state, work = tmp_path / "state", tmp_path / "work"
     seed_annotations(work)

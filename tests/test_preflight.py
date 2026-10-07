@@ -3,10 +3,12 @@ import json
 import math
 
 from reva import autopilot, package, preflight
+from reva.preflight import live_columns  # the real one: conftest swaps preflight.live_columns for a fake
 from reva.score import TASK_COLUMNS
-from tests.conftest import make_rows
-from tests.test_remote_autopilot import (BOARD_COLUMNS, NOW, QUEUE, RUN_CONFIG, TEST, FakeClient, FakeKaggle,
-                                         board_rows, cfg, probs_for, seed_annotations)
+from tests.conftest import BOARD_COLUMNS, make_rows
+from tests.test_remote_autopilot import (NOW, QUEUE, RUN_CONFIG, TEST, FakeClient, FakeKaggle, board_rows, cfg,
+                                         probs_for, seed_annotations)
+
 
 ROWS = make_rows("test", 2)
 
@@ -82,7 +84,7 @@ def test_live_columns_reads_the_competition_api(monkeypatch):
             return {"leaderboards": [{"primary_index": 0, "columns": cols}]}
 
     monkeypatch.setattr(preflight.requests, "get", lambda url, timeout: R())
-    assert preflight.live_columns(18274, "https://x") == BOARD_COLUMNS
+    assert live_columns(18274, "https://x") == BOARD_COLUMNS
 
 
 def test_projection_uses_scored_submissions_only():
@@ -182,3 +184,8 @@ def test_cycle_blocks_a_run_whose_config_lacks_the_compliance_flags(tmp_path):
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=True,
                           now=NOW + dt.timedelta(hours=1), fetch_board=board_rows, push=False)
     assert not client.submitted and "does not record model.use_video" in out["submit_error"]
+
+
+def test_every_test_module_answers_for_the_live_board():
+    # regression: the fake lived in one module's fixture, so this module's cycle tests called Codabench
+    assert preflight.live_columns(18274, "http://unreachable.invalid") == BOARD_COLUMNS

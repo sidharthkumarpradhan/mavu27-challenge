@@ -3,7 +3,18 @@ from pathlib import Path
 
 import pytest
 
+from reva import preflight
 from reva.score import TASK_COLUMNS
+
+BOARD_COLUMNS = ("overall_accuracy", {"overall_accuracy", *TASK_COLUMNS.values()})
+
+
+@pytest.fixture(autouse=True)
+def offline_columns(monkeypatch):
+    """Every upload path reads the live leaderboard columns first. Tests answer for Codabench, so
+    no test reaches the network (a fixture in one test module covers only that module)."""
+    monkeypatch.setattr(preflight, "live_columns", lambda *a, **k: BOARD_COLUMNS)
+
 
 SOURCES = [("VisDrone", "VisDrone"), ("Hawk_UAV", "NJ"), ("ERA_Tra", "Baseball")]
 

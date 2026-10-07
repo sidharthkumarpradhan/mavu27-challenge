@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from reva import autopilot, package, preflight, remote
-from tests.conftest import make_rows
+from reva import autopilot, package, remote
 from reva import config as C
 from reva.codabench import CodabenchError
 from reva.kaggle import Push
-from reva.score import TASK_COLUMNS
+from tests.conftest import make_rows
 
 NOW = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.timezone.utc)
 QUEUE = [{"name": "zs-4b", "set": {}}, {"name": "text-4b", "set": {"model.use_video": False}},
@@ -20,15 +19,6 @@ QUEUE = [{"name": "zs-4b", "set": {}}, {"name": "text-4b", "set": {"model.use_vi
 
 def cfg():
     return C.load()
-
-
-BOARD_COLUMNS = ("overall_accuracy", {"overall_accuracy", *TASK_COLUMNS.values()})
-
-
-@pytest.fixture(autouse=True)
-def offline_columns(monkeypatch):
-    """The cycle reads the live leaderboard columns before an upload; tests answer for Codabench."""
-    monkeypatch.setattr(preflight, "live_columns", lambda *a, **k: BOARD_COLUMNS)
 
 
 def test_run_ids_follow_config():
