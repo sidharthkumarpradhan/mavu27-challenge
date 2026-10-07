@@ -57,10 +57,11 @@ def test_autopilot_chains_itself_while_waiting():
     d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
     assert d["permissions"]["actions"] == "write"
     last = d["jobs"]["cycle"]["steps"][-1]
-    assert last["if"] == "always()" and "waiting" in last["run"]
+    assert last["if"] == "always()" and "[ -f idle ]" in last["run"]  # the loop marks idle when nothing is open
     # the dispatch must not depend on a checked-out repo: an always() step runs after a failed checkout
     assert "gh workflow run autopilot.yml --ref main --repo \"$GITHUB_REPOSITORY\"" in last["run"]
-    assert d["jobs"]["cycle"]["timeout-minutes"] > 20 + 8 + 10  # the wait, the retries and a cycle fit
+    # 4 h of cycles, then the last wait, a cycle that waits up to 20 minutes on a submission, the retries
+    assert d["jobs"]["cycle"]["timeout-minutes"] >= 240 + 20 + 25 + 8 + 10
 
 
 def test_next_cycle_dispatch_is_retried():
@@ -81,3 +82,23 @@ def test_autopilot_gets_both_kaggle_accounts():
     env = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())["jobs"]["cycle"]["env"]
     for user, key in ACCOUNT_VARS:
         assert env[user] == f"${{{{ secrets.{user} }}}}" and env[key] == f"${{{{ secrets.{key} }}}}"
+
+
+def cycles_step():
+    d = yaml.safe_load((ROOT / ".github" / "workflows" / "autopilot.yml").read_text())
+    return next(s for s in d["jobs"]["cycle"]["steps"] if s.get("name", "").startswith("Cycles"))
+
+
+def test_one_job_runs_many_cycles():
+    # the dispatch API failed for 8 minutes straight (7 Oct 2026), so one job loops for hours and
+    # dispatches the next job a few times a day instead of after every cycle
+    run = cycles_step()["run"]
+    assert "while :; do" in run and "-ge 14400" in run and "seq 20" in run
+    assert "|| crashed=1" in run and run.rstrip().endswith("exit $crashed")  # a crash cycles on, then shows red
+    assert "touch idle" in run
+
+
+def test_loop_hands_over_when_main_moves_but_not_when_github_is_unreachable():
+    run = cycles_step()["run"]
+    assert "git ls-remote origin refs/heads/main" in run
+    assert '[ -n "$main" ]' in run  # an empty answer is a network failure, not a new main

@@ -12,8 +12,11 @@
 # headless Claude Code fixer for failed jobs, as in the EURS loop.
 # Scheduled runs fire from the default branch; the job always checks out main.
 # GitHub had not fired the schedule once by 7 Oct 2026, so while a Kaggle job runs or a submission
-# is being scored, each cycle starts the next one itself about 20 minutes later. A dispatch made
-# with GITHUB_TOKEN is one of the two events that may start a new run (GitHub docs).
+# is being scored, the job runs a cycle about every 20 minutes for up to 4 hours, then starts the
+# next job itself. A dispatch made with GITHUB_TOKEN is one of the two events that may start a new
+# run (GitHub docs). The dispatch API answered HTTP 500 for 8 minutes straight on 7 Oct 2026, so the
+# loop calls it a few times a day instead of every 20 minutes. A job ends early when main moves, so
+# the push run of a merged change takes over within minutes.
 name: autopilot
 
 on:
@@ -37,7 +40,7 @@ jobs:
   cycle:
     if: vars.AUTOPILOT != 'off'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 330  # 4 h of cycles, the last wait and cycle, and the dispatch retries
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
@@ -90,40 +93,54 @@ jobs:
             git worktree add --orphan -b state state
           fi
 
-      - name: Cycle
+      - name: Cycles (about 20 minutes apart while a job or a submission is open)
         run: |
           nopush=""; [ "${{ steps.tests.outcome }}" = "success" ] || nopush="--no-push"
-          python -m reva.cli autopilot --state state --work work/autopilot --sha "$(git rev-parse HEAD)" --outcome outcome.json $nopush
-          cat state/STATUS.md >> "$GITHUB_STEP_SUMMARY"
+          git config --global user.name "Sidharth Pradhan"
+          git config --global user.email "sidharthp@assignall.ai"
+          started=$(date +%s); crashed=0
+          while :; do
+            rm -f outcome.json
+            python -m reva.cli autopilot --state state --work work/autopilot --sha "$(git rev-parse HEAD)" \
+              --outcome outcome.json $nopush || crashed=1
+            # save state
+            if [ -f state/STATUS.md ]; then
+              cat state/STATUS.md >> "$GITHUB_STEP_SUMMARY"
+              ( cd state
+                for f in STATUS.md board.csv runs.jsonl jobs.jsonl submissions.jsonl blocked.jsonl arena.json active.json; do
+                  [ -f "$f" ] && git add -- "$f"
+                done
+                git add -u -- .
+                git diff --cached --quiet || { git commit -q -m "autopilot: state at $(date -u +%Y-%m-%dT%H:%MZ)" && git push -q origin state; }
+              ) || echo "::warning::state push failed; the next cycle pushes it again"
+            fi
 
-      - name: Save state
-        if: always()
-        run: |
-          cd state
-          [ -f STATUS.md ] || exit 0
-          git config user.name "Sidharth Pradhan"
-          git config user.email "sidharthp@assignall.ai"
-          for f in STATUS.md board.csv runs.jsonl jobs.jsonl submissions.jsonl blocked.jsonl arena.json active.json; do
-            [ -f "$f" ] && git add -- "$f"
-          done
-          git add -u -- .
-          git diff --cached --quiet && exit 0
-          git commit -q -m "autopilot: state at $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q origin state
-
-      - name: Issue on a failed job
-        if: always()
-        run: |
-          [ -f outcome.json ] || exit 0
-          python - <<'PY'
+            # issue on a failed job
+            if [ -f outcome.json ]; then
+              python - <<'PY' || echo "::warning::could not open an issue for the failed job"
           import json, subprocess
           out = json.load(open("outcome.json"))
-          if not out.get("needs_fix"):
-              raise SystemExit(0)
-          runs = ", ".join(out["collected"])
-          body = "Failed lanes in the last job: " + runs + "\n\nLog tail:\n```\n" + out.get("log_tail", "")[-6000:] + "\n```"
-          subprocess.run(["gh", "issue", "create", "--title", f"Autopilot job failed: {runs}", "--body", body], check=True)
+          if out.get("needs_fix"):
+              runs = ", ".join(out["collected"])
+              body = "Failed lanes in the last job: " + runs + "\n\nLog tail:\n```\n" + out.get("log_tail", "")[-6000:] + "\n```"
+              subprocess.run(["gh", "issue", "create", "--title", f"Autopilot job failed: {runs}", "--body", body], check=True)
           PY
+            fi
+
+            # a cycle that crashed before writing its outcome keeps cycling, as the schedule would
+            if [ -f outcome.json ] && ! python -c "import json,sys; sys.exit(0 if json.load(open('outcome.json')).get('waiting') else 1)"; then
+              echo "nothing open; the next push or schedule starts the loop"; touch idle; break
+            fi
+            if [ $(( $(date +%s) - started )) -ge 14400 ]; then break; fi  # 4 h; the next job carries on
+            for i in $(seq 20); do  # wait 20 minutes, but hand over at once when main moves
+              sleep 60
+              main=$(git ls-remote origin refs/heads/main | cut -f1)  # empty when GitHub is unreachable
+              if [ -n "$main" ] && [ "$main" != "$(git rev-parse HEAD)" ]; then
+                echo "main moved; the next job runs the new code"; break 2
+              fi
+            done
+          done
+          exit $crashed
 
       - name: Fix a failed job (headless Claude Code, only when its secret is set)
         if: always() && (env.ANTHROPIC_API_KEY != '' || env.CLAUDE_CODE_OAUTH_TOKEN != '')
@@ -136,15 +153,11 @@ jobs:
           git config user.email "sidharthp@assignall.ai"
           claude -p "$(cat .github/autopilot/fix_prompt.md)" --allowedTools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode dontAsk
 
-      - name: Start the next cycle while a job or a submission is open
+      - name: Start the next job while a job or a submission is open
         if: always()
         run: |
-          # a cycle that crashed before writing its outcome keeps cycling, as the schedule would
-          if [ -f outcome.json ]; then
-            python -c "import json,sys; sys.exit(0 if json.load(open('outcome.json')).get('waiting') else 1)" \
-              || { echo "nothing open; the next push or schedule starts the loop"; exit 0; }
-          fi
-          sleep 1200
+          if [ -f idle ]; then echo "nothing open; no next job"; exit 0; fi
+          # also when main moved: a docs-only merge starts no push run (see the paths filter)
           # one HTTP 500 from the dispatch API broke the chain for an hour (7 Oct 2026), so retry
           for wait in 0 30 60 120 240; do
             sleep "$wait"
