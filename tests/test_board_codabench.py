@@ -131,3 +131,12 @@ def test_an_unknown_refusal_keeps_only_the_status_code():
     with pytest.raises(codabench.CodabenchError) as err:
         codabench.Client("t", session=FakeSession())._ok(r, "submission create")
     assert err.value.reason is None and autopilot.public(err.value) == "submission create failed (400)"
+
+
+def test_only_a_known_reason_reaches_the_public_note():
+    from reva import autopilot
+
+    class Other(Exception):
+        reason = "OtherTeam secret page"
+
+    assert autopilot.public(Other("lookup failed (500): body")) == "lookup failed (500)"

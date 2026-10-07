@@ -25,7 +25,7 @@ from pathlib import Path
 
 from reva import arena, board, data, package, preflight, registry, remote
 from reva import config as C
-from reva.codabench import DONE, FAILED, CodabenchError, scores
+from reva.codabench import DONE, FAILED, KNOWN_REASONS, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
 from reva.kaggle import FAILED as K_FAILED
 from reva.kaggle import KaggleError
@@ -66,7 +66,8 @@ def public(e: Exception) -> str:
     text = str(e)
     m = re.match(r"(.*?\(\d{3}\))", text, re.S)
     reason = getattr(e, "reason", None)
-    return (m.group(1) if m else text) + (f": {reason}" if m and reason else "")
+    known = reason in KNOWN_REASONS  # exact match only: callers also pass other exception types
+    return (m.group(1) if m else text) + (f": {reason}" if m and known else "")
 
 
 def pick_format(subs: list[dict], cfg: dict) -> str | None:
