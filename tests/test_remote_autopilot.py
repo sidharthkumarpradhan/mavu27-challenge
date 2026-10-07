@@ -193,7 +193,7 @@ def board_rows():
 
 
 def test_cycle_push_collect_submit(tmp_path):
-    c, state, work = cfg(), tmp_path / "state", tmp_path / "work"
+    c, state, work = C.override(cfg(), {"competition.organization": "StagAI"}), tmp_path / "state", tmp_path / "work"
     seed_annotations(work)
     k = FakeKaggle()
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
@@ -260,6 +260,12 @@ def test_cycle_fails_loudly_on_other_push_errors(tmp_path):
                         fetch_board=board_rows)
 
 
+def test_shipped_config_submits_as_the_personal_account():
+    # owner, 7 Oct 2026: the account lacks participant rights in StagAI, so submit as the account itself
+    assert C.get(cfg(), "competition.organization") == ""
+    assert autopilot.submit_as(FakeClient(), cfg()) is None
+
+
 def test_public_notes_drop_response_bodies():
     # STATUS.md is public; Codabench error text carries the response body after the status code
     e = CodabenchError('submission create failed (400): {"detail": "body"}')
@@ -324,7 +330,7 @@ def test_cycle_falls_back_to_the_next_format_and_reports_refusals(tmp_path):
 
 
 def test_unknown_organization_blocks_the_submission(tmp_path):
-    c, state, work = cfg(), tmp_path / "state", tmp_path / "work"
+    c, state, work = C.override(cfg(), {"competition.organization": "StagAI"}), tmp_path / "state", tmp_path / "work"
     seed_annotations(work)
     k = FakeKaggle()
     autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
