@@ -7,7 +7,7 @@ Challenge deadline Nov 10, 2026.
 
 It follows the playbook that took rank 1 at MaCVi 2027 EURS
 (`sidharthkumarpradhan/macvi27-challenge`, `docs/WORKFLOW.md`): measure first, a local scorer that
-mirrors the board, compliance gates before any upload, and an hourly loop that needs no laptop.
+mirrors the board, compliance gates before any upload, and a half-hourly loop that needs no laptop.
 
 ```
 live leaderboard -> per-task gap ----------------------------------------------+
@@ -27,7 +27,7 @@ configs/queue.yaml -> Kaggle job (2 lanes, one per T4) -> dev score + test zip -
 | `job` | one experiment start to finish on one GPU |
 | `remote`, `kaggle` | queue entries to a Kaggle kernel; the Kaggle CLI wrapper |
 | `board`, `codabench` | public leaderboard; login, upload, submit, poll |
-| `autopilot` | one hourly cycle: board, collect, gated submit, push next, STATUS.md |
+| `autopilot` | one cycle (twice an hour): board, collect, gated submit, push next, STATUS.md |
 | `smoke` | the whole GPU job on CPU with a tiny model and synthetic videos |
 
 ## Use
@@ -44,7 +44,7 @@ python -m reva.cli submit --run <run_id> --state state/      # owner-triggered s
 
 ## Automation
 
-`.github/workflows/autopilot.yml` runs every hour on the default branch:
+`.github/workflows/autopilot.yml` runs twice an hour on the default branch:
 
 1. Snapshot the leaderboard.
 2. Poll open submissions.
