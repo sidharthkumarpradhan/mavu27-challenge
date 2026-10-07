@@ -1,7 +1,7 @@
-# ReVA autopilot status (2026-10-07T18:53:11Z)
+# ReVA autopilot status (2026-10-07T19:13:37Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 7 rows, 0 new; leader mkhlystun 0.8760
+- leaderboard: 7 rows, 1 new; leader mkhlystun 0.8795
 - Kaggle weekly GPU quota reached on account 1
 - Kaggle account 2 kernels have no internet (is its phone number verified?); next try after 2026-10-07T23:32:23Z
 - no Kaggle account can take the next job; it waits
@@ -10,7 +10,7 @@
 
 | # | owner | overall |
 |---|---|---|
-| 1 | mkhlystun | 0.8760 |
+| 1 | mkhlystun | 0.8795 |
 | 2 | h | 0.8625 |
 | 3 | amirmazaheri | 0.8313 |
 | 4 | Vincente | 0.8257 |
@@ -22,17 +22,17 @@
 
 | task | leader | ours | overall points lost |
 |---|---|---|---|
-| Temporal Grounding | 0.828 | 0.503 | 5.20 |
-| Perspective and Viewpoint | 0.896 | 0.571 | 3.90 |
-| Change Detection | 0.818 | 0.688 | 1.62 |
-| Object and Land Cover Recognition | 0.868 | 0.783 | 1.40 |
-| Geometric Relation | 0.897 | 0.762 | 1.35 |
+| Temporal Grounding | 0.834 | 0.503 | 5.30 |
+| Perspective and Viewpoint | 0.900 | 0.571 | 3.95 |
+| Object and Land Cover Recognition | 0.882 | 0.783 | 1.62 |
+| Change Detection | 0.816 | 0.688 | 1.60 |
+| Geometric Relation | 0.892 | 0.762 | 1.30 |
 | Trend and Pattern | 0.883 | 0.767 | 1.05 |
-| Structural Layout | 0.876 | 0.771 | 0.90 |
+| Structural Layout | 0.882 | 0.771 | 0.95 |
 | General Understanding | 0.983 | 0.950 | 0.15 |
-| Causation Reasoning | 0.950 | 0.922 | 0.13 |
 | Hypothetical Reasoning | 0.887 | 0.863 | 0.10 |
-| Consequence Reasoning | 0.970 | 0.960 | 0.03 |
+| Causation Reasoning | 0.944 | 0.922 | 0.10 |
+| Consequence Reasoning | 0.980 | 0.960 | 0.05 |
 
 ## Calibration (board minus local weighted dev)
 
