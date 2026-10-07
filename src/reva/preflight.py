@@ -2,7 +2,8 @@
 
 The test labels are hidden, so nothing local can prove a board score. What can be checked:
 - the file is what Codabench asks for, and it holds exactly this run's answers (validate, round trip);
-- the run is allowed on the test set (video input on, no training on val);
+- the run is allowed on the test set: its own run.json says video input on and no training on
+  val (a missing flag counts as a failure);
 - the run is not broken in a way dev accuracy can miss (non-finite probabilities, one letter for
   almost every answer);
 - the live leaderboard still ranks by overall accuracy over the 11 task columns we score locally.
@@ -22,6 +23,7 @@ import zipfile
 
 import requests
 
+from reva import config as C
 from reva import package
 from reva.codabench import DONE
 from reva.data import LETTERS
@@ -31,6 +33,46 @@ from reva.score import OVERALL, TASK_COLUMNS
 # balanced at about 25% per letter (measured 6 Oct 2026), and even a strongly letter-biased
 # zero-shot model stays well inside them.
 MIN_SHARE, MAX_SHARE = 0.05, 0.60
+
+
+class Blocked(Exception):
+    """A run that must not be uploaded. The problems carry counts and shares, never answers."""
+
+    def __init__(self, problems: list[str]):
+        super().__init__("; ".join(problems))
+        self.problems = problems
+
+
+def probs_problems(probs: dict[str, list[float]], test: list[dict]) -> list[str]:
+    """Why these test probabilities cannot become a submission, before any answer is derived."""
+    want = {r["qa_id"] for r in test}
+    out = []
+    if missing := want - set(probs):
+        out.append(f"probabilities: {len(missing)} test questions have none")
+    if extra := set(probs) - want:
+        out.append(f"probabilities: {len(extra)} are for questions not in test.json")
+    bad = [q for q, p in probs.items()
+           if not isinstance(p, list) or len(p) != 4
+           or not all(isinstance(x, (int, float)) and math.isfinite(x) and x >= 0 for x in p)]
+    if bad:
+        out.append(f"probabilities: {len(bad)} rows are not 4 finite non-negative numbers")
+    return out
+
+
+def compliance_problems(configs: list[dict]) -> list[str]:
+    """From each run's full config (its run.json). A missing flag fails: no evidence, no upload."""
+    out = []
+    for cfg in configs:
+        video, with_val = C.get(cfg, "model.use_video"), C.get(cfg, "train.refit_with_val")
+        if video is False:
+            out.append("compliance: a text-only run never goes to the test set")
+        elif video is not True:
+            out.append("compliance: the run does not record model.use_video")
+        if with_val is True:
+            out.append("compliance: train.refit_with_val is the owner's call and stays false")
+        elif with_val is not False:
+            out.append("compliance: the run does not record train.refit_with_val")
+    return out
 
 
 def answers(zip_path, fmt: str) -> dict[str, str]:
@@ -60,23 +102,16 @@ def metric_problem(columns: tuple[str, set[str]]) -> str | None:
     return None
 
 
-def check(zip_path, test: list[dict], probs: dict[str, list[float]], fmt: str, run: dict) -> list[str]:
-    """Every reason not to upload this run's zip. An empty list means ready."""
-    problems = []
+def check(zip_path, test: list[dict], probs: dict[str, list[float]], fmt: str, configs: list[dict]) -> list[str]:
+    """Every reason not to upload this zip. `configs` are the full configs of the run (or of every
+    member of an ensemble). An empty list means ready."""
+    problems = compliance_problems(configs)
     try:
         package.validate(zip_path, test, fmt)
     except ValueError as e:
         problems.append(f"format: {e}")
-
-    cfg = run.get("config", {})
-    if cfg.get("model.use_video") is False:
-        problems.append("compliance: a text-only run never goes to the test set")
-    if cfg.get("train.refit_with_val") is True:
-        problems.append("compliance: train.refit_with_val is the owner's call and stays false")
-
-    bad = [q for q, p in probs.items() if len(p) != 4 or not all(math.isfinite(x) and x >= 0 for x in p)]
-    if bad:
-        problems.append(f"probabilities: {len(bad)} rows are not 4 finite non-negative numbers")
+    if bad := probs_problems(probs, test):
+        problems += bad
     else:
         want = {q: LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
         try:

@@ -5,8 +5,8 @@ import math
 from reva import autopilot, package, preflight
 from reva.score import TASK_COLUMNS
 from tests.conftest import make_rows
-from tests.test_remote_autopilot import (BOARD_COLUMNS, NOW, QUEUE, TEST, FakeClient, FakeKaggle, board_rows, cfg,
-                                         probs_for, seed_annotations)
+from tests.test_remote_autopilot import (BOARD_COLUMNS, NOW, QUEUE, RUN_CONFIG, TEST, FakeClient, FakeKaggle,
+                                         board_rows, cfg, probs_for, seed_annotations)
 
 ROWS = make_rows("test", 2)
 
@@ -18,19 +18,19 @@ def zip_of(tmp_path, probs, rows=ROWS, fmt="fill_test"):
 
 def test_a_healthy_run_is_ready(tmp_path):
     probs = probs_for(ROWS)
-    assert preflight.check(zip_of(tmp_path, probs), ROWS, probs, "fill_test", {"config": {}}) == []
+    assert preflight.check(zip_of(tmp_path, probs), ROWS, probs, "fill_test", [RUN_CONFIG]) == []
 
 
 def test_zip_must_hold_the_runs_own_answers(tmp_path):
     probs = probs_for(ROWS)
     z = zip_of(tmp_path, probs)
     other = {**probs, ROWS[0]["qa_id"]: [0.0, 0.0, 0.0, 1.0] if probs[ROWS[0]["qa_id"]][3] < 0.5 else [1.0, 0, 0, 0]}
-    assert any("round trip: 1 answers" in p for p in preflight.check(z, ROWS, other, "fill_test", {"config": {}}))
+    assert any("round trip: 1 answers" in p for p in preflight.check(z, ROWS, other, "fill_test", [RUN_CONFIG]))
 
 
 def test_one_letter_for_almost_everything_is_a_broken_run(tmp_path):
     probs = probs_for(ROWS, letter="A")
-    problems = preflight.check(zip_of(tmp_path, probs), ROWS, probs, "fill_test", {"config": {}})
+    problems = preflight.check(zip_of(tmp_path, probs), ROWS, probs, "fill_test", [RUN_CONFIG])
     assert problems == ["letter balance: A 100.0%, B 0.0%, C 0.0%, D 0.0% of answers (expected 5% to 60% each)"]
     assert not any(r["qa_id"] in problems[0] for r in ROWS)  # STATUS.md is public: no ids, no answers
 
@@ -38,18 +38,31 @@ def test_one_letter_for_almost_everything_is_a_broken_run(tmp_path):
 def test_compliance_rules_block_the_test_set(tmp_path):
     probs = probs_for(ROWS)
     z = zip_of(tmp_path, probs)
-    text_only = preflight.check(z, ROWS, probs, "fill_test", {"config": {"model.use_video": False}})
-    with_val = preflight.check(z, ROWS, probs, "fill_test", {"config": {"train.refit_with_val": True}})
-    assert "text-only" in text_only[0] and "refit_with_val" in with_val[0]
+
+    def problems(model, train):
+        return preflight.check(z, ROWS, probs, "fill_test", [{"model": model, "train": train}])
+    assert problems({"use_video": False}, {"refit_with_val": False}) == [
+        "compliance: a text-only run never goes to the test set"]
+    assert problems({"use_video": True}, {"refit_with_val": True}) == [
+        "compliance: train.refit_with_val is the owner's call and stays false"]
+    # no evidence, no upload: a run whose config lacks a flag is not trusted
+    assert problems({}, {}) == ["compliance: the run does not record model.use_video",
+                                "compliance: the run does not record train.refit_with_val"]
+    ensemble = [RUN_CONFIG, {"model": {"use_video": False}, "train": {"refit_with_val": False}}]
+    assert "text-only" in preflight.check(z, ROWS, probs, "fill_test", ensemble)[0]
 
 
 def test_bad_probabilities_and_bad_files_are_caught(tmp_path):
     probs = probs_for(ROWS)
     z = zip_of(tmp_path, probs)
     nan = {**probs, ROWS[0]["qa_id"]: [math.nan, 0.1, 0.1, 0.1]}
-    assert "probabilities: 1 rows" in preflight.check(z, ROWS, nan, "fill_test", {"config": {}})[0]
+    assert "probabilities: 1 rows" in preflight.check(z, ROWS, nan, "fill_test", [RUN_CONFIG])[0]
+    short_probs = {q: p for q, p in probs.items() if q != ROWS[0]["qa_id"]}
+    assert preflight.probs_problems(short_probs, ROWS) == ["probabilities: 1 test questions have none"]
+    assert preflight.probs_problems({**probs, "x": [1, 0, 0, 0], ROWS[1]["qa_id"]: []}, ROWS) == [
+        "probabilities: 1 are for questions not in test.json", "probabilities: 1 rows are not 4 finite non-negative numbers"]
     short = zip_of(tmp_path, probs_for(ROWS[1:]), rows=ROWS[1:])
-    assert preflight.check(short, ROWS, probs, "fill_test", {"config": {}})[0].startswith("format: 1 test qa_ids missing")
+    assert preflight.check(short, ROWS, probs, "fill_test", [RUN_CONFIG])[0].startswith("format: 1 test qa_ids missing")
 
 
 def test_metric_must_match_the_live_board():
@@ -135,3 +148,37 @@ def test_cycle_holds_every_upload_when_the_board_metric_changes(tmp_path):
                           now=NOW + dt.timedelta(hours=2), fetch_board=board_rows, push=False, fetch_columns=down)
     assert "could not read the live leaderboard columns" in out["submit_error"]
     assert "secret" not in (state / "STATUS.md").read_text()
+
+
+def test_cycle_blocks_a_run_with_missing_probabilities_instead_of_crashing(tmp_path):
+    c, state, work, k = collected(tmp_path)
+    real = k.output
+
+    def short(slug, dest):
+        out = real(slug, dest)
+        for run_id in k.active_runs:
+            (dest / run_id / "test_probs.json").write_text(json.dumps(probs_for(TEST[1:])))
+        return out
+    k.output = short
+    client = FakeClient()
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=1), fetch_board=board_rows, push=False)
+    assert not client.submitted and "1 test questions have none" in out["submit_error"]
+    assert (state / "blocked.jsonl").exists() and (state / "STATUS.md").exists()
+
+
+def test_cycle_blocks_a_run_whose_config_lacks_the_compliance_flags(tmp_path):
+    c, state, work, k = collected(tmp_path)
+    real = k.output
+
+    def old_run(slug, dest):
+        out = real(slug, dest)
+        for run_id in k.active_runs:
+            rj = dest / run_id / "run.json"
+            rj.write_text(json.dumps({**json.loads(rj.read_text()), "config": {"why": "w"}}))
+        return out
+    k.output = old_run
+    client = FakeClient()
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=1), fetch_board=board_rows, push=False)
+    assert not client.submitted and "does not record model.use_video" in out["submit_error"]

@@ -112,10 +112,40 @@ def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[
     probs = json.loads(probs_path.read_text())
     ann = work / "annotations"
     data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
-    preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
     test = data.load_split(ann, "test")
+    if problems := preflight.probs_problems(probs, test):  # before any answer is derived from them
+        raise preflight.Blocked(problems)
+    preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
     zip_path = package.write(work / "submit" / f"{run['run_id']}.zip", test, preds, fmt, data.load_metadata(ann, "test"))
     return zip_path, test, probs
+
+
+def run_config(kaggle, run: dict, work: Path) -> dict:
+    """The full config a run was made with, from the run.json in its private kernel output."""
+    dest = work / run["kernel"].split("/")[-1]
+    path = dest / run["run_id"] / "run.json"
+    if not path.exists():
+        kaggle.output(run["kernel"], dest)
+    return json.loads(path.read_text())["config"]
+
+
+def checked_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path, fetch_columns=None) -> Path:
+    """The run's zip, rebuilt and passed through every pre-upload check (reva.preflight).
+
+    Raises preflight.Blocked when the run itself must never be uploaded, and CodabenchError when
+    nothing may be uploaded right now (the board's metric changed, or could not be read)."""
+    fetch_columns = fetch_columns or (lambda: preflight.live_columns(
+        C.get(cfg, "competition.id"), C.get(cfg, "competition.base")))
+    try:
+        columns = fetch_columns()
+    except Exception:  # a fixed note: STATUS.md is public and error text may hold response bodies
+        raise CodabenchError("could not read the live leaderboard columns; trying again next cycle") from None
+    if problem := preflight.metric_problem(columns):
+        raise CodabenchError(problem)
+    zip_path, test, probs = submission_zip(kaggle, run, fmt, cfg, work)
+    if problems := preflight.check(zip_path, test, probs, fmt, [run_config(kaggle, run, work)]):
+        raise preflight.Blocked(problems)
+    return zip_path
 
 
 def summarize_config(cfg: dict) -> dict:
@@ -262,18 +292,11 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 if not can:
                     raise CodabenchError(f"Codabench refuses submissions for this account: {reason}")
                 fmt = pick_format(subs, cfg)
-                zip_path, test, probs = submission_zip(kaggle, r, fmt, cfg, work)
-                fetch_columns = fetch_columns or (lambda: preflight.live_columns(
-                    C.get(cfg, "competition.id"), C.get(cfg, "competition.base")))
                 try:
-                    columns = fetch_columns()
-                except Exception:  # a fixed note: STATUS.md is public and error text may hold response bodies
-                    raise CodabenchError("could not read the live leaderboard columns; trying again next cycle") from None
-                if problem := preflight.metric_problem(columns):
-                    raise CodabenchError(problem)
-                if problems := preflight.check(zip_path, test, probs, fmt, r):
-                    registry.append(state / "blocked.jsonl", {"run_id": r["run_id"], "when": iso(now), "problems": problems})
-                    raise CodabenchError("pre-upload checks failed: " + "; ".join(problems))
+                    zip_path = checked_zip(kaggle, r, fmt, cfg, work, fetch_columns)
+                except preflight.Blocked as b:
+                    registry.append(state / "blocked.jsonl", {"run_id": r["run_id"], "when": iso(now), "problems": b.problems})
+                    raise CodabenchError(f"pre-upload checks failed: {b}") from None
                 org = submit_as(client, cfg)
                 sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
                                     [C.get(cfg, "competition.task")], organization=org)

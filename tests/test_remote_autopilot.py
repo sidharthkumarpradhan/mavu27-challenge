@@ -107,6 +107,9 @@ def seed_annotations(work: Path) -> None:
         (ann / f"{split}.json").write_text(json.dumps({"metadata": TEST_META, "QA": rows}))
 
 
+RUN_CONFIG = {"why": "w", "model": {"use_video": True}, "train": {"refit_with_val": False}}
+
+
 def probs_for(rows, letter=None):
     """A spread of answers like a real model's, or every answer on one letter."""
     out = {}
@@ -132,7 +135,7 @@ class FakeKaggle:
             if self.lanes_ok:
                 (d / "run.json").write_text(json.dumps({
                     "metrics": {"weighted_accuracy": 0.6, "overall_accuracy": 0.61}, "hours": 2.0, "zip": f"{run_id}.zip",
-                    "n": {"test": 4000}, "train": None, "timings": {}, "versions": {}, "config": {"why": "w"},
+                    "n": {"test": 4000}, "train": None, "timings": {}, "versions": {}, "config": RUN_CONFIG,
                     "finished": "2026-10-07T11:00:00Z"}))
                 (d / f"{run_id}.zip").write_bytes(b"PK")
                 (d / "test_probs.json").write_text(json.dumps(probs_for(TEST)))

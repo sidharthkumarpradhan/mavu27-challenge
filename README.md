@@ -40,7 +40,7 @@ make smoke          # full job on CPU, prints READY
 python -m reva.cli board                     # live leaderboard
 python -m reva.cli build --sha <commit>      # the Kaggle kernel for the next queued lanes (pushes nothing)
 python -m reva.cli job --config-json run.json --out out/   # one experiment on a local GPU
-python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission
+python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission, same checks
 ```
 
 ## Automation
