@@ -9,7 +9,7 @@ competition:
   task: 36510                 # the phase's only task, "ReVA VideoQA"
   deadline: "2026-11-10"      # 11:59 PM PST, workshop site
   owner: ""                   # our Codabench username, for rank lookups (set once known)
-  organization: StagAI        # the "Submit as" choice on Codabench; empty submits as the account
+  organization: ""            # the "Submit as" choice on Codabench; empty submits as the account (owner, 7 Oct 2026)
 
 data:
   hf_repo: ReVA-Benchmark/ReVA

@@ -109,8 +109,11 @@ From the Codabench pages (read in full 6 Oct 2026):
   board. Only single video runs without refit or val training take part. Preflight reads every
   member's run.json, so one non-compliant member blocks the ensemble.
 - Name each submission with the run id. Calibration pairs board scores with local runs by that id.
-- Submit as the Codabench organization StagAI (owner's choice, 6 Oct 2026), set in
-  `competition.organization`. If the account cannot submit for it, the loop submits nothing.
+- Submit as the owner's personal Codabench account (owner, 7 Oct 2026: "use my personal account,
+  make the organization empty"). `competition.organization` is empty. The earlier choice, StagAI,
+  failed: the account lacks participant rights there ("You do not have participant permissions for
+  this group"). If an organization is set again and the account cannot submit for it, the loop
+  submits nothing.
 
 ## Verified facts (6 Oct 2026)
 
