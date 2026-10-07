@@ -387,6 +387,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             if retry and retry > now:
                 notes.append(f"Kaggle account {n} kernels have no internet (is its phone number verified?); "
                              f"next try after {iso(retry)}")
+                out["resting"] = True  # keep cycling: nothing else starts the loop again at the retry time
                 continue
             used = gpu_hours(jobs, now, user=user)
             if used + C.get(cfg, "remote.max_hours") > C.get(cfg, "remote.weekly_gpu_hours"):
@@ -411,6 +412,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             active_path.write_text(json.dumps(active, indent=1))
             out["pushed"] = active
             out.pop("push_refused", None)
+            out.pop("resting", None)
             notes.append(f"pushed {slug} with {active['runs']}")
             break
         else:
@@ -420,7 +422,8 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     # something will change without a push: a Kaggle job still running or a submission still being
     # scored. The workflow starts the next cycle itself while this holds.
     # A refused push also counts: nothing else would start the loop again once the quota resets.
-    out["waiting"] = bool(active) or out.get("push_refused", False) or any(s["status"] not in DONE | FAILED for s in subs)
+    out["waiting"] = (bool(active) or out.get("push_refused", False) or out.get("resting", False)
+                      or any(s["status"] not in DONE | FAILED for s in subs))
     (state / "STATUS.md").write_text(status_md(cfg, rows, runs, subs, active, jobs, now, notes))
     out["notes"] = notes
     return out

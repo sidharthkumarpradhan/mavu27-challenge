@@ -306,6 +306,12 @@ def test_offline_account_rests_then_gets_another_try(tmp_path):
     assert k.pushed[0].startswith("first/")  # the offline account is skipped
     assert "account 1 kernels have no internet" in (state / "STATUS.md").read_text()
     later = NOW + dt.timedelta(hours=6)
+
+    # the only account is offline: the loop keeps cycling so the retry after 6 h happens
+    state2 = tmp_path / "state2"
+    registry.append(state2 / "runs.jsonl", offline_row("x", NOW - dt.timedelta(hours=1)))
+    out = autopilot.cycle(cfg(), QUEUE, state2, work, FakeKaggle(), "sha", ["second"], now=NOW, fetch_board=board_rows)
+    assert out["pushed"] is None and out["waiting"] is True
     assert autopilot.offline_until(registry.read(state / "runs.jsonl"), "second") <= later  # retried after 6 h
 
 
