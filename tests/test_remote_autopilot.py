@@ -9,7 +9,7 @@ import pytest
 from reva import autopilot, package, registry, remote
 from reva import config as C
 from reva.codabench import CodabenchError
-from reva.kaggle import Push
+from reva.kaggle import KaggleError, Push
 from tests.conftest import make_rows
 
 NOW = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.timezone.utc)
@@ -232,6 +232,28 @@ def test_cycle_waits_only_while_something_is_open(tmp_path):
     out = autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", now=NOW, fetch_board=board_rows,
                           push=False)
     assert out["waiting"] is True
+
+
+class QuotaKaggle(FakeKaggle):
+    def push(self, kdir, timeout_s=None, accelerator=None):
+        raise KaggleError("kernel push failed: Maximum weekly GPU quota of 30.00 hours reached.")
+
+
+def test_cycle_survives_a_refused_push_and_keeps_cycling(tmp_path):
+    # regression: on 7 Oct 2026 the quota error crashed the cycle after collecting, so STATUS.md
+    # was never written and the loop would have stopped for good
+    state, work = tmp_path / "state", tmp_path / "work"
+    out = autopilot.cycle(cfg(), QUEUE, state, work, QuotaKaggle(), "sha", "me", now=NOW, fetch_board=board_rows)
+    assert out["pushed"] is None and out["waiting"] is True
+    assert not (state / "active.json").exists()
+    assert "GPU quota reached" in (state / "STATUS.md").read_text()
+
+
+def test_public_notes_drop_response_bodies():
+    # STATUS.md is public; Codabench error text carries the response body after the status code
+    e = CodabenchError('submission create failed (400): {"detail": "body"}')
+    assert autopilot.public(e) == "submission create failed (400)"
+    assert autopilot.public(CodabenchError("organization 'X' not found")) == "organization 'X' not found"
 
 
 def test_cycle_failed_lanes_flag_a_fix_and_never_submit(tmp_path):
