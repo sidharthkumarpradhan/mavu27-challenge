@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 from reva import score
@@ -29,8 +30,8 @@ def eligible(runs: list[dict]) -> list[dict]:
     for r in runs:
         cfg = r.get("config") or {}
         if (r.get("status") == "ok" and r.get("zip") and r.get("n", {}).get("test") == 4000 and not r.get("members")
-                and cfg.get("model.use_video") is not False and not cfg.get("train.refit")
-                and not cfg.get("train.refit_with_val")):
+                and cfg.get("model.use_video") is True and cfg.get("train.refit_with_val") is False
+                and not cfg.get("train.refit")):  # no evidence of a fair run, no place in a mix
             out.append(r)
     return sorted(out, key=lambda r: -r["metrics"]["weighted_accuracy"])
 
@@ -39,16 +40,19 @@ def ensemble_id(members: list[str]) -> str:
     return "ens-" + hashlib.sha1(",".join(sorted(members)).encode()).hexdigest()[:8]
 
 
-def load_probs(kaggle, run: dict, work: Path, name: str) -> dict[str, list[float]]:
-    """dev_probs.json or test_probs.json of a run, fetched from its private kernel output when this
-    runner has not got it. For an ensemble, the mean over its members."""
-    if run.get("members"):
-        return mean([load_probs(kaggle, m, work, name) for m in run["members"]])
+def fetch(kaggle, run: dict, work: Path, name: str) -> Path:
+    """One file of a single run's private kernel output, downloaded alone when this runner has not
+    got it (the Kaggle CLI matches the pattern against each output path, like "<run_id>/run.json")."""
     dest = work / run["kernel"].split("/")[-1]
     path = dest / run["run_id"] / name
     if not path.exists():
-        kaggle.output(run["kernel"], dest)
-    return json.loads(path.read_text())
+        kaggle.output(run["kernel"], dest, file_pattern=rf"(^|/){re.escape(run['run_id'])}/{re.escape(name)}$")
+    return path
+
+
+def load_probs(kaggle, run: dict, work: Path, name: str) -> dict[str, list[float]]:
+    """dev_probs.json or test_probs.json of a single run."""
+    return json.loads(fetch(kaggle, run, work, name).read_text())
 
 
 def mean(probs: list[dict[str, list[float]]]) -> dict[str, list[float]]:
@@ -74,9 +78,15 @@ def p_better(dev: list[dict], a: dict[str, str], b: dict[str, str]) -> float:
 
 def best_ensemble(singles: list[dict], dev_probs: dict[str, dict], dev: list[dict], test: list[dict],
                   min_cell: int = 20) -> dict | None:
-    """The top-k average (k from 2) with the best weighted dev accuracy, if it beats the best single."""
+    """The top-k average (k from 2) with the best weighted dev accuracy, if it beats the best single.
+
+    Singles are re-scored here with the same scorer, so a run whose job used other scoring
+    settings is ranked and compared fairly."""
     if len(singles) < 2:
         return None
+    own = {r["run_id"]: score.summary(dev, argmax(dev_probs[r["run_id"]]), test, min_cell)["weighted_accuracy"]
+           for r in singles}
+    singles = sorted(singles, key=lambda r: -own[r["run_id"]])
     best_single = argmax(dev_probs[singles[0]["run_id"]])
     found = None
     for k in range(2, min(MAX_K, len(singles)) + 1):
@@ -85,9 +95,9 @@ def best_ensemble(singles: list[dict], dev_probs: dict[str, dict], dev: list[dic
         metrics = score.summary(dev, preds, test, min_cell)
         if found is None or metrics["weighted_accuracy"] > found["metrics"]["weighted_accuracy"]:
             found = {"members": members, "metrics": metrics, "p": p_better(dev, preds, best_single)}
-    if found["metrics"]["weighted_accuracy"] <= singles[0]["metrics"]["weighted_accuracy"]:
+    if found["metrics"]["weighted_accuracy"] <= own[singles[0]["run_id"]]:
         return None
-    return found
+    return {**found, "best": singles[0]["run_id"], "best_weighted": own[singles[0]["run_id"]]}
 
 
 def step(kaggle, runs: list[dict], dev: list[dict], test: list[dict], work: Path, seen: list[str], now: str,
@@ -115,11 +125,10 @@ def step(kaggle, runs: list[dict], dev: list[dict], test: list[dict], work: Path
     run_id = ensemble_id(members)
     if any(r["run_id"] == run_id for r in runs):
         return None, ids, f"arena: best is still {run_id}"
-    best = found["members"][0]
     row = {"run_id": run_id, "status": "ok", "members": [{"run_id": m["run_id"], "kernel": m["kernel"]} for m in found["members"]],
            "metrics": found["metrics"], "n": {"dev": len(dev), "test": 4000}, "zip": "rebuilt from members",
            "hours": 0, "finished": now, "config": {"model.use_video": True, "ensemble": members},
            "why": f"mean of top {len(members)} on dev: {', '.join(members)}; "
-                  f"P(beats {best['run_id']}) {found['p']:.2f}"}
+                  f"P(beats {found['best']}) {found['p']:.2f}"}
     return row, ids, (f"arena: {run_id} = mean of {len(members)} runs, dev weighted "
-                      f"{found['metrics']['weighted_accuracy']:.4f} vs best single {best['metrics']['weighted_accuracy']:.4f}")
+                      f"{found['metrics']['weighted_accuracy']:.4f} vs best single {found['best_weighted']:.4f}")

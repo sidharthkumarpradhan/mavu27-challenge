@@ -108,12 +108,15 @@ def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[
     from the run's own kernel when this runner has not got it; averaged over the members for an
     ensemble), validated against test.json. Returns (zip, test rows, test probabilities) for the
     pre-upload checks."""
-    probs = arena.load_probs(kaggle, run, work, "test_probs.json")
     ann = work / "annotations"
     data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
     test = data.load_split(ann, "test")
-    if problems := preflight.probs_problems(probs, test):  # before any answer is derived from them
-        raise preflight.Blocked(problems)
+    members = run.get("members") or [run]
+    loaded = [arena.load_probs(kaggle, m, work, "test_probs.json") for m in members]
+    for m, p in zip(members, loaded):  # each member, before anything is averaged or derived from them
+        if problems := preflight.probs_problems(p, test):
+            raise preflight.Blocked([f"{m['run_id']}: {x}" for x in problems] if run.get("members") else problems)
+    probs = arena.mean(loaded)
     preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
     zip_path = package.write(work / "submit" / f"{run['run_id']}.zip", test, preds, fmt, data.load_metadata(ann, "test"))
     return zip_path, test, probs
@@ -121,11 +124,7 @@ def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[
 
 def run_config(kaggle, run: dict, work: Path) -> dict:
     """The full config a run was made with, from the run.json in its private kernel output."""
-    dest = work / run["kernel"].split("/")[-1]
-    path = dest / run["run_id"] / "run.json"
-    if not path.exists():
-        kaggle.output(run["kernel"], dest)
-    return json.loads(path.read_text())["config"]
+    return json.loads(arena.fetch(kaggle, run, work, "run.json").read_text())["config"]
 
 
 def checked_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path, fetch_columns=None) -> Path:

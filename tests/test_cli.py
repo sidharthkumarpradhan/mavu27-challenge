@@ -42,7 +42,7 @@ def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
                                                                                   "overall_accuracy": 0.5}})
     real = k.output
 
-    def one_letter(slug, dest):
+    def one_letter(slug, dest, file_pattern=None):
         out = real(slug, dest)
         (dest / "zs-4b-x" / "test_probs.json").write_text(json.dumps(probs_for(TEST, "C")))
         return out
