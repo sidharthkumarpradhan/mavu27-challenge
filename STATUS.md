@@ -1,9 +1,7 @@
-# ReVA autopilot status (2026-10-07T11:48:05Z)
+# ReVA autopilot status (2026-10-07T12:09:05Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 6 rows, 0 new; leader mkhlystun 0.8735
-- next candidate zs-4b-6254e8de: dev weighted 0.7130 +/- 0.0155, projected board 0.7130 (0 calibration pairs); leader 0.8735, below by 0.1605
-- submitted zs-4b-6254e8de as 966854 (fill_test): dev 0.7130 (first submission); status Finished
+- leaderboard: 7 rows, 1 new; leader mkhlystun 0.8735
 - Kaggle weekly GPU quota reached; the next job waits for it to reset
 
 ## Leaderboard (top 8)
@@ -14,8 +12,9 @@
 | 2 | h | 0.8625 |
 | 3 | amirmazaheri | 0.8313 |
 | 4 | Vincente | 0.8257 |
-| 5 | Hoang Bui | 0.6793 |
-| 6 | chrisathy | 0.2515 |
+| 5 | StagAI | 0.7177 |
+| 6 | Hoang Bui | 0.6793 |
+| 7 | chrisathy | 0.2515 |
 
 ## Gap to the leader (best submission zs-4b-6254e8de)
 
