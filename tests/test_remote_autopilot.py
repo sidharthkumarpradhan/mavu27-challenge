@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from reva import autopilot, package, remote
+from reva import autopilot, package, preflight, remote
 from tests.conftest import make_rows
 from reva import config as C
 from reva.codabench import CodabenchError
 from reva.kaggle import Push
+from reva.score import TASK_COLUMNS
 
 NOW = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.timezone.utc)
 QUEUE = [{"name": "zs-4b", "set": {}}, {"name": "text-4b", "set": {"model.use_video": False}},
@@ -19,6 +20,15 @@ QUEUE = [{"name": "zs-4b", "set": {}}, {"name": "text-4b", "set": {"model.use_vi
 
 def cfg():
     return C.load()
+
+
+BOARD_COLUMNS = ("overall_accuracy", {"overall_accuracy", *TASK_COLUMNS.values()})
+
+
+@pytest.fixture(autouse=True)
+def offline_columns(monkeypatch):
+    """The cycle reads the live leaderboard columns before an upload; tests answer for Codabench."""
+    monkeypatch.setattr(preflight, "live_columns", lambda *a, **k: BOARD_COLUMNS)
 
 
 def test_run_ids_follow_config():
@@ -97,6 +107,16 @@ def seed_annotations(work: Path) -> None:
         (ann / f"{split}.json").write_text(json.dumps({"metadata": TEST_META, "QA": rows}))
 
 
+def probs_for(rows, letter=None):
+    """A spread of answers like a real model's, or every answer on one letter."""
+    out = {}
+    for i, r in enumerate(rows):
+        p = [0.1] * 4
+        p[("ABCD".index(letter) if letter else i % 4)] = 0.7
+        out[r["qa_id"]] = p
+    return out
+
+
 class FakeKaggle:
     def __init__(self, state="running", lanes_ok=True):
         self.state, self.lanes_ok, self.pushed = state, lanes_ok, []
@@ -115,7 +135,7 @@ class FakeKaggle:
                     "n": {"test": 4000}, "train": None, "timings": {}, "versions": {}, "config": {"why": "w"},
                     "finished": "2026-10-07T11:00:00Z"}))
                 (d / f"{run_id}.zip").write_bytes(b"PK")
-                (d / "test_probs.json").write_text(json.dumps({r["qa_id"]: [0.7, 0.1, 0.1, 0.1] for r in TEST}))
+                (d / "test_probs.json").write_text(json.dumps(probs_for(TEST)))
         return [], "EXIT 0"
 
     def push(self, kdir, timeout_s=None, accelerator=None):

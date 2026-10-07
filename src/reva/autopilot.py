@@ -8,6 +8,7 @@ State lives in a directory that the workflow keeps on the `state` branch:
 - jobs.jsonl         one row per finished job, with wall hours (the weekly GPU tally)
 - runs.jsonl         one row per lane: run id, status, dev metrics, hours, config summary
 - submissions.jsonl  one row per Codabench submission, updated by appending newer rows
+- blocked.jsonl      runs the pre-upload checks stopped (reva.preflight), never retried
 - board.csv          every leaderboard row ever seen
 - STATUS.md          the human summary
 The repo is public. Nothing here holds test predictions or probabilities.
@@ -19,7 +20,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
-from reva import board, data, package, registry, remote
+from reva import board, data, package, preflight, registry, remote
 from reva import config as C
 from reva.codabench import DONE, FAILED, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
@@ -92,16 +93,18 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
     return True, f"dev {mine:.4f}" + (f" vs best submitted {best:.4f}" if best is not None else " (first submission)")
 
 
-def candidate(runs: list[dict], subs: list[dict]) -> dict | None:
-    """Best finished full-test run by weighted dev accuracy that has no live submission yet."""
-    taken = {s["run_id"] for s in subs if s["status"] not in FAILED}
+def candidate(runs: list[dict], subs: list[dict], blocked: set[str] = frozenset()) -> dict | None:
+    """Best finished full-test run by weighted dev accuracy that has no live submission yet and
+    was not stopped by the pre-upload checks."""
+    taken = {s["run_id"] for s in subs if s["status"] not in FAILED} | set(blocked)
     ok = [r for r in runs if r["status"] == "ok" and r.get("zip") and r["run_id"] not in taken]
     return max(ok, key=lambda r: r["metrics"]["weighted_accuracy"], default=None)
 
 
-def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> Path:
+def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[Path, list[dict], dict]:
     """Rebuild the run's zip in the chosen layout from its private test_probs.json (re-downloaded
-    from the run's own kernel when this runner has not got it), validated against test.json."""
+    from the run's own kernel when this runner has not got it), validated against test.json.
+    Returns (zip, test rows, test probabilities) for the pre-upload checks."""
     dest = work / run["kernel"].split("/")[-1]
     probs_path = dest / run["run_id"] / "test_probs.json"
     if not probs_path.exists():
@@ -110,13 +113,14 @@ def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> Path:
     ann = work / "annotations"
     data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
     preds = {q: data.LETTERS[max(range(4), key=p.__getitem__)] for q, p in probs.items()}
-    return package.write(work / "submit" / f"{run['run_id']}.zip", data.load_split(ann, "test"), preds, fmt,
-                         data.load_metadata(ann, "test"))
+    test = data.load_split(ann, "test")
+    zip_path = package.write(work / "submit" / f"{run['run_id']}.zip", test, preds, fmt, data.load_metadata(ann, "test"))
+    return zip_path, test, probs
 
 
 def summarize_config(cfg: dict) -> dict:
     keys = ["model.id", "model.load_4bit", "model.use_video", "frames.n", "frames.max_side", "train.enabled",
-            "train.epochs", "train.max_samples", "train.refit", "infer.perms"]
+            "train.epochs", "train.max_samples", "train.refit", "train.refit_with_val", "infer.perms"]
     return {k: C.get(cfg, k) for k in keys}
 
 
@@ -186,7 +190,7 @@ def submit_as(client, cfg: dict) -> int | None:
 
 def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_user: str,
           client=None, auto_submit: bool = False, now: dt.datetime | None = None,
-          fetch_board=None, push: bool = True, notes: list[str] | None = None) -> dict:
+          fetch_board=None, push: bool = True, notes: list[str] | None = None, fetch_columns=None) -> dict:
     """One step. `client` is a logged-in reva.codabench.Client or None (then nothing is submitted)."""
     now = now or dt.datetime.now(dt.timezone.utc)
     state.mkdir(parents=True, exist_ok=True)
@@ -244,8 +248,10 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             notes.append(f"job {active['kernel']} is {kstate}")
 
     # 4. gated submission: the best run not yet submitted, from any cycle
-    r = candidate(registry.read(state / "runs.jsonl"), subs)
+    blocked = {b["run_id"] for b in registry.read(state / "blocked.jsonl")}
+    r = candidate(registry.read(state / "runs.jsonl"), subs, blocked)
     if r:
+        notes.append(preflight.forecast(r, subs, rows[0].get("overall_accuracy") if rows else None))
         allowed, why = gate(r, subs, cfg, now)
         if not allowed or not auto_submit or not client:
             notes.append(f"not submitting {r['run_id']}: "
@@ -256,7 +262,18 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 if not can:
                     raise CodabenchError(f"Codabench refuses submissions for this account: {reason}")
                 fmt = pick_format(subs, cfg)
-                zip_path = submission_zip(kaggle, r, fmt, cfg, work)
+                zip_path, test, probs = submission_zip(kaggle, r, fmt, cfg, work)
+                fetch_columns = fetch_columns or (lambda: preflight.live_columns(
+                    C.get(cfg, "competition.id"), C.get(cfg, "competition.base")))
+                try:
+                    columns = fetch_columns()
+                except Exception:  # a fixed note: STATUS.md is public and error text may hold response bodies
+                    raise CodabenchError("could not read the live leaderboard columns; trying again next cycle") from None
+                if problem := preflight.metric_problem(columns):
+                    raise CodabenchError(problem)
+                if problems := preflight.check(zip_path, test, probs, fmt, r):
+                    registry.append(state / "blocked.jsonl", {"run_id": r["run_id"], "when": iso(now), "problems": problems})
+                    raise CodabenchError("pre-upload checks failed: " + "; ".join(problems))
                 org = submit_as(client, cfg)
                 sid = client.submit(zip_path, C.get(cfg, "competition.id"), C.get(cfg, "competition.phase"),
                                     [C.get(cfg, "competition.task")], organization=org)

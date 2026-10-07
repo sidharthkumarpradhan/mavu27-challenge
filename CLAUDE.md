@@ -98,6 +98,12 @@ From the Codabench pages (read in full 6 Oct 2026):
   cycle tries the next (Failed submissions are free). A layout that scored once is kept.
 - `train.refit_with_val` stays false. Agent's call under the owner's "handle everything", made for
   compliance (the val overlap above). Revisit only with the owner.
+- Every upload passes `reva.preflight` first: the zip holds exactly the run's own answers, the run
+  used video and no val training, no letter takes under 5% or over 60% of answers, and the live
+  board still ranks by overall accuracy over our 11 columns. A failed run goes to `blocked.jsonl`.
+- The test labels are hidden, so no local check proves a board score. STATUS.md shows a projection
+  (dev weighted plus the mean board-minus-dev gap of our scored submissions). It is not a gate:
+  holding back until we project above the leader would skip the format check and calibration.
 - Name each submission with the run id. Calibration pairs board scores with local runs by that id.
 - Submit as the Codabench organization StagAI (owner's choice, 6 Oct 2026), set in
   `competition.organization`. If the account cannot submit for it, the loop submits nothing.

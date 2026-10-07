@@ -96,7 +96,7 @@ jobs:
           [ -f STATUS.md ] || exit 0
           git config user.name "Sidharth Pradhan"
           git config user.email "sidharthp@assignall.ai"
-          for f in STATUS.md board.csv runs.jsonl jobs.jsonl submissions.jsonl active.json; do
+          for f in STATUS.md board.csv runs.jsonl jobs.jsonl submissions.jsonl blocked.jsonl active.json; do
             [ -f "$f" ] && git add -- "$f"
           done
           git add -u -- .

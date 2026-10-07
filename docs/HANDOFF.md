@@ -34,6 +34,13 @@ These are the first things the first job will tell us. Check its log before trus
   The owner should switch the default to `main` in Settings > General. Until then the hourly
   schedule fires from that branch, but the job checks out and runs `main` anyway.
 
+## Added 7 Oct 2026
+
+- The loop runs twice an hour (:23 and :53).
+- Pre-upload checks (`reva.preflight`) run on every rebuilt zip before it goes to Codabench.
+  STATUS.md shows the next candidate's dev score with a 95% interval and a projected board score.
+- Account approved: STATUS shows "submits as StagAI (id 2763)".
+
 ## Next steps, in order
 
 1. Job 1 (`zs-4b` + `text-4b`): read seconds per question and dev accuracy per task. The loop
