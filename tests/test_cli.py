@@ -67,7 +67,7 @@ def test_manual_submit_runs_the_pre_upload_checks(tmp_path, monkeypatch):
         return out
     k.output = one_letter
     client = FakeClient()
-    monkeypatch.setattr(reva.kaggle, "Kaggle", lambda: k)
+    monkeypatch.setattr(reva.kaggle, "from_env", lambda: k)
     monkeypatch.setattr(cli, "_client", lambda cfg: client)
     monkeypatch.setattr(preflight, "live_columns", lambda *a, **kw: BOARD_COLUMNS)
     argv = ["submit", "--run", "zs-4b-x", "--state", str(state), "--work", str(work)]
@@ -96,7 +96,7 @@ def test_manual_submit_takes_an_arena_ensemble(tmp_path, monkeypatch):
                                            "members": members, "metrics": {"weighted_accuracy": 0.7,
                                                                            "overall_accuracy": 0.7}})
     client = FakeClient()
-    monkeypatch.setattr(reva.kaggle, "Kaggle", lambda: k)
+    monkeypatch.setattr(reva.kaggle, "from_env", lambda: k)
     monkeypatch.setattr(cli, "_client", lambda cfg: client)
     monkeypatch.setattr(preflight, "live_columns", lambda *a, **kw: BOARD_COLUMNS)
     assert cli.main(["submit", "--run", "ens-1", "--state", str(state), "--work", str(work)]) == 0

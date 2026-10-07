@@ -67,7 +67,7 @@ def cmd_build(a) -> int:
 
 def cmd_autopilot(a) -> int:
     from reva import autopilot, remote
-    from reva.kaggle import Kaggle
+    from reva.kaggle import from_env
 
     cfg = _cfg(a)
     auto = os.environ.get("AUTO_SUBMIT", "on").lower() != "off"  # on unless the owner sets it off
@@ -84,7 +84,9 @@ def cmd_autopilot(a) -> int:
             login += f"; submits as {org} (id {client.organization_id(org)})"
         except Exception:  # a fixed note: error text may hold response bodies, and STATUS.md is public
             login += f"; could not confirm organization {org}, so nothing will be submitted"
-    out = autopilot.cycle(cfg, remote.load_queue(a.queue), Path(a.state), Path(a.work), Kaggle(), a.sha, a.user,
+    kaggle = from_env()
+    out = autopilot.cycle(cfg, remote.load_queue(a.queue), Path(a.state), Path(a.work), kaggle, a.sha,
+                          getattr(kaggle, "users", [a.user]),
                           client=client, auto_submit=auto, push=not a.no_push, notes=[login])
     print("\n".join(out["notes"]))
     if a.outcome:
@@ -99,7 +101,7 @@ def cmd_submit(a) -> int:
     from reva import preflight, registry
     from reva.autopilot import checked_zip, iso, latest_submissions, pick_format, submit_as
     from reva.codabench import CodabenchError, scores
-    from reva.kaggle import Kaggle
+    from reva.kaggle import from_env
 
     cfg = _cfg(a)
     state = Path(a.state)
@@ -121,7 +123,7 @@ def cmd_submit(a) -> int:
         print("Codabench failed every predictions.json layout; the scorer needs a code fix")
         return 1
     try:
-        zip_path = checked_zip(Kaggle(), run, fmt, cfg, Path(a.work))
+        zip_path = checked_zip(from_env(), run, fmt, cfg, Path(a.work))
     except (preflight.Blocked, CodabenchError) as e:
         print(f"not submitting {run['run_id']}: {e}")
         return 1

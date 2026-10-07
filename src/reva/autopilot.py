@@ -53,9 +53,11 @@ def latest_submissions(rows: list[dict]) -> list[dict]:
     return sorted(last.values(), key=lambda r: r["submitted"])
 
 
-def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7) -> float:
+def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7, user: str | None = None) -> float:
+    """GPU hours of jobs collected in the last `days`, for one account's kernels when `user` is set."""
     since = now - dt.timedelta(days=days)
-    return sum(j.get("hours", 0) for j in jobs if parse_iso(j["collected"]) >= since)
+    return sum(j.get("hours", 0) for j in jobs if parse_iso(j["collected"]) >= since
+               and (user is None or j.get("kernel", "").split("/")[0].lower() == user.lower()))
 
 
 def public(e: Exception) -> str:
@@ -231,10 +233,11 @@ def submit_as(client, cfg: dict) -> int | None:
     return client.organization_id(name) if name else None
 
 
-def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_user: str,
+def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_users: str | list[str],
           client=None, auto_submit: bool = False, now: dt.datetime | None = None,
           fetch_board=None, push: bool = True, notes: list[str] | None = None, fetch_columns=None) -> dict:
-    """One step. `client` is a logged-in reva.codabench.Client or None (then nothing is submitted)."""
+    """One step. `client` is a logged-in reva.codabench.Client or None (then nothing is submitted).
+    `kaggle_users` are the Kaggle accounts in priority order; a job goes to the first with GPU quota left."""
     now = now or dt.datetime.now(dt.timezone.utc)
     state.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
@@ -358,30 +361,38 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             if r["status"] != "ok":
                 failed[r["run_id"]] = failed.get(r["run_id"], 0) + 1
         lanes = remote.pending(cfg, queue, done, failed)[: C.get(cfg, "remote.lanes")]
-        used = gpu_hours(jobs, now)
+        users = [kaggle_users] if isinstance(kaggle_users, str) else list(kaggle_users)
         if not lanes:
             notes.append("queue empty: add experiments to configs/queue.yaml")
-        elif used + C.get(cfg, "remote.max_hours") > C.get(cfg, "remote.weekly_gpu_hours"):
-            notes.append(f"GPU quota pacing: {used:.1f} h used in 7 days; waiting")
-        else:
+        for n, user in enumerate(users if lanes else [], 1):
+            used = gpu_hours(jobs, now, user=user)
+            if used + C.get(cfg, "remote.max_hours") > C.get(cfg, "remote.weekly_gpu_hours"):
+                notes.append(f"GPU quota pacing on Kaggle account {n}: {used:.1f} h used in 7 days")
+                continue
             kdir = work / "kernel"
-            slug = remote.build(cfg, lanes, sha, kdir, kaggle_user)
+            slug = remote.build(cfg, lanes, sha, kdir, user)
             try:
                 pushed = kaggle.push(kdir, timeout_s=int(3600 * C.get(cfg, "remote.max_hours")),
                                      accelerator=C.get(cfg, "remote.accelerator"))
             except KaggleError as e:
-                # The weekly GPU quota (hit on 7 Oct 2026) clears by itself, so keep the loop alive and
-                # retry each cycle. Any other refusal (credentials, metadata) needs a fix: fail loudly.
+                # The weekly GPU quota (hit on 7 Oct 2026) clears by itself: try the next account, and
+                # if none is left keep the loop alive and retry each cycle. Any other refusal
+                # (credentials, metadata) needs a fix: fail loudly.
                 if "gpu quota" not in str(e).lower():
                     raise
                 out["push_refused"] = True
-                notes.append("Kaggle weekly GPU quota reached; the next job waits for it to reset")
-            else:
-                active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
-                          "url": pushed.url}
-                active_path.write_text(json.dumps(active, indent=1))
-                out["pushed"] = active
-                notes.append(f"pushed {slug} with {active['runs']}")
+                notes.append(f"Kaggle weekly GPU quota reached on account {n}")
+                continue
+            active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
+                      "url": pushed.url}
+            active_path.write_text(json.dumps(active, indent=1))
+            out["pushed"] = active
+            out.pop("push_refused", None)
+            notes.append(f"pushed {slug} with {active['runs']}")
+            break
+        else:
+            if lanes:
+                notes.append("no Kaggle account has GPU quota left; the next job waits for a reset")
 
     # something will change without a push: a Kaggle job still running or a submission still being
     # scored. The workflow starts the next cycle itself while this holds.

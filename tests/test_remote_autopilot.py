@@ -249,6 +249,40 @@ def test_cycle_survives_a_refused_push_and_keeps_cycling(tmp_path):
     assert "GPU quota reached" in (state / "STATUS.md").read_text()
 
 
+class FirstOutOfQuota(FakeKaggle):
+    def push(self, kdir, timeout_s=None, accelerator=None):
+        if json.loads((kdir / "kernel-metadata.json").read_text())["id"].startswith("first/"):
+            raise KaggleError("kernel push failed: Maximum weekly GPU quota of 30.00 hours reached.")
+        return super().push(kdir, timeout_s, accelerator)
+
+
+def test_cycle_falls_back_to_the_second_account(tmp_path):
+    # owner, 7 Oct 2026: the first account's weekly quota ran out, so the next job uses the second
+    state, work, k = tmp_path / "state", tmp_path / "work", FirstOutOfQuota()
+    out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["first", "second"], now=NOW, fetch_board=board_rows)
+    assert k.pushed[0].startswith("second/") and out["pushed"]["kernel"] == k.pushed[0]
+    assert "push_refused" not in out and out["waiting"]  # the job runs on the second account
+    assert json.loads((state / "active.json").read_text())["kernel"].startswith("second/")
+
+
+def test_cycle_waits_when_every_account_is_out_of_quota(tmp_path):
+    state, work = tmp_path / "state", tmp_path / "work"
+    out = autopilot.cycle(cfg(), QUEUE, state, work, QuotaKaggle(), "sha", ["first", "second"], now=NOW,
+                          fetch_board=board_rows)
+    assert out["pushed"] is None and out["push_refused"] and out["waiting"]
+    status = (state / "STATUS.md").read_text()
+    assert "account 1" in status and "account 2" in status and "waits for a reset" in status
+
+
+def test_gpu_pacing_counts_each_account_apart(tmp_path):
+    state, work, k = tmp_path / "state", tmp_path / "work", FakeKaggle()
+    registry.append(state / "jobs.jsonl", {"kernel": "first/reva-a", "hours": 25.0,
+                                            "collected": autopilot.iso(NOW - dt.timedelta(days=1))})
+    assert autopilot.gpu_hours(registry.read(state / "jobs.jsonl"), NOW, user="second") == 0
+    autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["first", "second"], now=NOW, fetch_board=board_rows)
+    assert k.pushed[0].startswith("second/")  # 25 h + an 11.5 h job would pass the first account's 30 h
+
+
 class BrokenKaggle(FakeKaggle):
     def push(self, kdir, timeout_s=None, accelerator=None):
         raise KaggleError("kernel push failed: Invalid credentials")
