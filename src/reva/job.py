@@ -7,7 +7,14 @@ Writes into --out:
 - dev_probs.json  dev probabilities (labeled data only, safe to keep)
 - test_probs.json and <run_id>.zip   test predictions; these never enter the public repo
 - adapter/        LoRA weights when the run trains
-The last stdout line is "DONE <run_id>" on success. Any failure exits non-zero.
+- ckpt/           the last full training checkpoint (adapter, optimizer, RNG, position)
+- train.json      training stats, written when training is complete
+- dev_probs.part.json, test_probs.part.json   predictions so far, while inference runs
+
+Every one of these lets a later session carry on: start it with the same --out holding a copy of
+this output, and finished stages are skipped, training resumes from ckpt/, inference from the
+.part files. The last stdout line is "DONE <run_id>" on success and "PARTIAL <run_id>" (exit 3) when
+a run that spans sessions stopped at a session's end. Any failure exits non-zero.
 """
 
 from __future__ import annotations
@@ -70,7 +77,54 @@ def prepare(cfg: dict) -> tuple[dict[str, list[dict]], Path]:
     return sp, cache_dir
 
 
-def train_deadline(cfg: dict, vlm, sp: dict, video_of, perms: int, end: float, probe: int = 12) -> float:
+PARTIAL_EXIT = 3
+MARGIN_S = 900  # what a spanning run keeps at the session's end to save its state
+
+
+class SessionOver(Exception):
+    """A run that spans sessions (train.span_sessions) reached this session's end; its state is saved."""
+
+
+def write_json(path: Path, obj) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj))
+    tmp.replace(path)  # atomic: a session killed mid-write never leaves half a file
+
+
+def video_chunks(rows: list[dict], size: int) -> list[list[dict]]:
+    """Rows in chunks of about `size`, never splitting a video, so each chunk keeps the shared prefix."""
+    by_video: dict[str, list[dict]] = {}
+    for r in rows:
+        by_video.setdefault(r["video_path"], []).append(r)
+    out, cur = [], []
+    for group in by_video.values():
+        cur += group
+        if len(cur) >= size:
+            out, cur = out + [cur], []
+    return out + ([cur] if cur else [])
+
+
+def predict_saved(vlm, rows: list[dict], video_of, perms: int, path: Path, stop_at: float | None = None,
+                  chunk: int = 100) -> dict[str, list[float]]:
+    """vlm.predict over rows, saved to `path` after every chunk. Questions already in `path` (from an
+    earlier session) are not scored again. Raises SessionOver once `stop_at` has passed."""
+    done = json.loads(path.read_text()) if path.exists() else {}
+    todo = [r for r in rows if r["qa_id"] not in done]
+    if done:
+        print(f"resuming {path.name}: {len(rows) - len(todo)} of {len(rows)} already scored", flush=True)
+    t0, n = time.time(), 0
+    for part in video_chunks(todo, chunk):
+        if stop_at is not None and time.time() > stop_at:
+            raise SessionOver(f"{path.name}: {len(rows) - len(todo) + n} of {len(rows)} scored")
+        done.update(vlm.predict(part, video_of, perms, log_every=10**9))
+        n += len(part)
+        write_json(path, done)
+        print(f"predict {len(rows) - len(todo) + n}/{len(rows)} {(time.time() - t0) / n:.2f} s/q", flush=True)
+    return {r["qa_id"]: done[r["qa_id"]] for r in rows}
+
+
+def train_deadline(cfg: dict, vlm, sp: dict, video_of, perms: int, end: float, probe: int = 12,
+                   strict: bool = True) -> float:
     """When training must stop so dev and test inference still finish inside the session.
 
     Times `probe` dev questions first (warm-up included, so the estimate errs high), then reserves
@@ -87,7 +141,7 @@ def train_deadline(cfg: dict, vlm, sp: dict, video_of, perms: int, end: float, p
     deadline = min(cap, end - infer_s)
     print(f"BUDGET {rate:.2f} s/q, inference needs {infer_s / 3600:.2f} h, "
           f"training gets {max(0, deadline - time.time()) / 3600:.2f} h", flush=True)
-    if end - time.time() < infer_s:
+    if strict and end - time.time() < infer_s:  # a spanning run finishes inference in a later session
         raise RuntimeError(f"inference alone needs {infer_s / 3600:.1f} h, more than the session has left; "
                            "use fewer frames, a smaller model, or infer.perms 1")
     return deadline
@@ -97,34 +151,47 @@ def run(cfg: dict, out: Path, device: str) -> dict:
     t0 = time.time()
     run_id = cfg["run_id"]
     out.mkdir(parents=True, exist_ok=True)
+    (out / "partial.json").unlink(missing_ok=True)  # an earlier session's; this one writes its own
     ann = Path(C.get(cfg, "data.root"))
     sp, cache_dir = prepare(cfg)
     train_on = C.get(cfg, "train.enabled", False)
     timings = {"prep_s": round(time.time() - t0)}
     video_of = video_reader(cfg, cache_dir)
 
-    from reva.model import VLM, train
+    from reva.model import VLM, find_checkpoint, train
 
     vlm = VLM(cfg["model"], device)
     perms = C.get(cfg, "infer.perms", 1)
     end = t0 + 3600 * C.get(cfg, "job.max_hours", 1e9)
-    deadline = train_deadline(cfg, vlm, sp, video_of, perms, end) if train_on else None
+    span = C.get(cfg, "train.span_sessions", False)
+    stop_at = end - MARGIN_S if span else None
     stats = None
-    if train_on:
-        vlm.add_lora(cfg["train"], C.get(cfg, "train.init_adapter"))
-        stats = train(vlm, sp["fit"], video_of, cfg["train"], out, deadline, seed=C.get(cfg, "train.seed", 0))
+    if train_on and (out / "train.json").exists():  # trained in an earlier session
+        stats = json.loads((out / "train.json").read_text())
+        vlm.add_lora(cfg["train"], out / "adapter")
+        vlm.model.eval()
+        print(f"training finished in an earlier session ({stats['samples']} samples); inference only", flush=True)
+    elif train_on:
+        deadline = train_deadline(cfg, vlm, sp, video_of, perms, end, strict=not span)
+        ckpt = find_checkpoint(out)
+        vlm.add_lora(cfg["train"], ckpt / "adapter" if ckpt else C.get(cfg, "train.init_adapter"))
+        stats = train(vlm, sp["fit"], video_of, cfg["train"], out, deadline, seed=C.get(cfg, "train.seed", 0),
+                      stop_at=stop_at, resume=ckpt)
+        if stats["stopped"] == "session":
+            raise SessionOver(f"training: step {stats['steps']}, {stats['samples']} samples")
+        write_json(out / "train.json", stats)
     timings["train_s"] = round(time.time() - t0) - sum(timings.values())
 
-    dev_probs = vlm.predict(sp["dev"], video_of, perms)
+    dev_probs = predict_saved(vlm, sp["dev"], video_of, perms, out / "dev_probs.part.json", stop_at)
     metrics = score.summary(sp["dev"], argmax(dev_probs), sp["test"], C.get(cfg, "dev.min_cell", 20))
-    (out / "dev_probs.json").write_text(json.dumps(dev_probs))
+    write_json(out / "dev_probs.json", dev_probs)
     print("DEV " + json.dumps({k: round(v, 4) for k, v in metrics.items()}), flush=True)
     timings["dev_s"] = round(time.time() - t0) - sum(timings.values())
 
     zip_path = None
     if not C.get(cfg, "infer.skip_test", False):
-        test_probs = vlm.predict(sp["test"], video_of, perms)
-        (out / "test_probs.json").write_text(json.dumps(test_probs))
+        test_probs = predict_saved(vlm, sp["test"], video_of, perms, out / "test_probs.part.json", stop_at)
+        write_json(out / "test_probs.json", test_probs)
         if len(test_probs) == 4000 or C.get(cfg, "limit.test"):
             zip_path = out / f"{run_id}.zip"
             meta = data.load_metadata(ann, "test")
@@ -161,7 +228,13 @@ def main(argv: list[str] | None = None) -> int:
         prepare(cfg)
         print(f"PREPARED {cfg['run_id']}", flush=True)
         return 0
-    run(cfg, Path(a.out), a.device)
+    try:
+        run(cfg, Path(a.out), a.device)
+    except SessionOver as e:
+        write_json(Path(a.out) / "partial.json", {"run_id": cfg["run_id"], "where": str(e),
+                                                  "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        print(f"PARTIAL {cfg['run_id']}: {e}", flush=True)
+        return PARTIAL_EXIT
     print(f"DONE {cfg['run_id']}", flush=True)
     return 0
 

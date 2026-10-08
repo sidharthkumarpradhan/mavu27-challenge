@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import shutil
 import time
 from pathlib import Path
 
@@ -274,14 +275,47 @@ def count_steps(sizes, accum: int, since: int = 0) -> int:
     return steps + (since > 0)
 
 
+def save_checkpoint(model, out_dir: str | Path, state: dict) -> Path:
+    """Everything train() needs to carry on: the adapter plus optimizer, scheduler, scaler, RNG
+    states and the position in the training order. Written next to the last checkpoint and then
+    swapped in, so a session that dies while saving still leaves one whole checkpoint behind."""
+    out_dir = Path(out_dir)
+    tmp, cur, old = out_dir / "ckpt.tmp", out_dir / "ckpt", out_dir / "ckpt.old"
+    shutil.rmtree(tmp, ignore_errors=True)
+    model.save_pretrained(tmp / "adapter")
+    torch.save(state, tmp / "state.pt")
+    shutil.rmtree(old, ignore_errors=True)
+    if cur.exists():
+        cur.rename(old)
+    tmp.rename(cur)
+    shutil.rmtree(old, ignore_errors=True)
+    return cur
+
+
+def find_checkpoint(out_dir: str | Path) -> Path | None:
+    """The newest whole checkpoint in out_dir: ckpt, or ckpt.old when a save was cut off mid-swap."""
+    for name in ("ckpt", "ckpt.old"):
+        p = Path(out_dir) / name
+        if (p / "state.pt").is_file() and (p / "adapter").is_dir():
+            return p
+    return None
+
+
 def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path, deadline: float | None,
-          seed: int = 0) -> dict:
+          seed: int = 0, stop_at: float | None = None, resume: str | Path | None = None) -> dict:
     """LoRA fine-tune on letter cross-entropy. Stops at the end of the epochs or at `deadline`
     (time.time()), whichever is first, and saves the adapter to out_dir/adapter.
 
     Questions about the same video train together, `train.pack` at a time (VLM.packed_logits), so
     the video is encoded once per group. Models with linear-attention layers train one at a time.
     fp16 (T4, V100) uses a GradScaler; steps with a non-finite loss are skipped and counted.
+
+    A full checkpoint goes to out_dir/ckpt every `train.ckpt_minutes`. `resume` (a checkpoint
+    directory, whose adapter the caller already loaded) carries on from it: the training order
+    comes from `seed` again, and the RNG states make the rest of the run the same as if it had
+    never stopped. With `stop_at` (the session's end), training that cannot finish before
+    `deadline` uses the whole session instead of shrinking, checkpoints, and returns with
+    stopped == "session"; the next session resumes it (train.span_sessions).
     """
     model = vlm.model
     deadline = float("inf") if deadline is None else deadline
@@ -298,10 +332,33 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
         1 + math.cos(math.pi * min(1.0, s / max(1, plan["total"])))))
     fp16 = vlm.cfg.get("dtype", "fp16") == "fp16" and vlm.device.startswith("cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=fp16)
+    stats = {"steps": 0, "samples": 0, "skipped": 0, "loss": None, "stopped": "done", "pack": pack, "sessions": 1}
+    i = 0
+    if resume:
+        state = torch.load(Path(resume) / "state.pt", map_location="cpu", weights_only=False)
+        opt.load_state_dict(state["opt"])
+        sched.load_state_dict(state["sched"])
+        scaler.load_state_dict(state["scaler"])
+        rng.setstate(state["rng"])
+        torch.set_rng_state(state["torch_rng"])
+        if state.get("cuda_rng") and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(state["cuda_rng"])
+        i, stats = state["i"], {**state["stats"], "stopped": "done"}
+        stats["sessions"] = stats.get("sessions", 1) + 1
+        plan["total"] = stats["steps"] + count_steps(map(len, order[i:]), accum)
+        plan["warm"] = state["plan"]["warm"]
+        print(f"resumed from {resume}: step {stats['steps']}, {stats['samples']} samples, "
+              f"group {i} of {len(order)}", flush=True)
     model.train()
-    stats = {"steps": 0, "samples": 0, "skipped": 0, "loss": None, "stopped": "done", "pack": pack}
     run_loss, run_n, since, seen, t0 = 0.0, 0, 0, 0, time.time()
     calib, sized = tcfg.get("calib_samples", 2 * accum), False
+    every_s, saved = 60 * tcfg.get("ckpt_minutes", 20), time.time()
+
+    def checkpoint() -> None:
+        save_checkpoint(model, out_dir, {
+            "i": i, "stats": stats, "plan": dict(plan), "rng": rng.getstate(), "opt": opt.state_dict(),
+            "sched": sched.state_dict(), "scaler": scaler.state_dict(), "torch_rng": torch.get_rng_state(),
+            "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None})
 
     def step(window: int) -> None:
         """One optimizer step over `window` samples. The loss was divided by accum, so rescale to a
@@ -318,23 +375,33 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
         sched.step()
         stats["steps"] += 1
 
-    i = 0
+    spanning = False
     while i < len(order):
         if not sized and seen >= calib and deadline < float("inf"):
-            # self-sizing: after `calib` samples, keep only as many as fit before the deadline
             sized, rate = True, (time.time() - t0) / seen
-            fit, kept = int(0.95 * (deadline - time.time()) / rate), i
-            while kept < len(order) and fit >= len(order[kept]):
-                fit -= len(order[kept])
-                kept += 1
-            if kept < len(order):
-                order = order[:max(kept, i + 1)]
-                plan["total"] = stats["steps"] + count_steps(map(len, order[i:]), accum, since)
-                plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
-            stats["planned_samples"] = seen + sum(map(len, order[i:]))
-            print(f"train sized to {stats['planned_samples']} samples at {rate:.2f} s/sample", flush=True)
+            left = sum(map(len, order[i:]))
+            if stop_at is not None and time.time() + rate * left > deadline:
+                # too much for this session: train until it ends, and the next one carries on
+                spanning, deadline = True, stop_at
+                print(f"train needs {rate * left / 3600:.2f} h more at {rate:.2f} s/sample; "
+                      f"training to the session's end, the next session resumes", flush=True)
+            else:
+                # self-sizing: keep only as many samples as fit before the deadline
+                fit, kept = int(0.95 * (deadline - time.time()) / rate), i
+                while kept < len(order) and fit >= len(order[kept]):
+                    fit -= len(order[kept])
+                    kept += 1
+                if kept < len(order):
+                    order = order[:max(kept, i + 1)]
+                    plan["total"] = stats["steps"] + count_steps(map(len, order[i:]), accum, since)
+                    plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
+                stats["planned_samples"] = stats["samples"] + sum(map(len, order[i:]))
+                print(f"train sized to {stats['planned_samples']} samples at {rate:.2f} s/sample", flush=True)
         if time.time() > deadline:
-            stats["stopped"] = "deadline"
+            if stop_at is not None and not spanning:  # no time left for inference here: train on, infer next session
+                spanning, deadline = True, stop_at
+                continue
+            stats["stopped"] = "session" if spanning else "deadline"
             break
         group = order[i]
         i += 1
@@ -371,14 +438,19 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
                 print(f"train step {stats['steps']}/{plan['total']} loss {stats['loss']:.4f} "
                       f"{(time.time() - t0) / seen:.2f} s/sample", flush=True)
                 run_loss, run_n = 0.0, 0
-            if stats["steps"] % tcfg.get("save_every", 200) == 0:
-                model.save_pretrained(Path(out_dir) / "adapter")
+            if time.time() - saved >= every_s:  # only between optimizer steps: no gradients in flight
+                checkpoint()
+                saved = time.time()
     if since:  # the last short window was backpropagated; step on it too
         step(since)
-    model.save_pretrained(Path(out_dir) / "adapter")
-    model.eval()
-    stats["planned_steps"] = plan["total"]
+        since = 0
     if stats["loss"] is None and run_n:  # a run shorter than one logging interval
         stats["loss"] = run_loss / run_n
-    stats["seconds"] = round(time.time() - t0)
+    stats["planned_steps"] = plan["total"]
+    stats["seconds"] = stats.get("seconds", 0) + round(time.time() - t0)
+    if stats["stopped"] == "session":
+        checkpoint()
+        return stats
+    model.save_pretrained(Path(out_dir) / "adapter")
+    model.eval()
     return stats
