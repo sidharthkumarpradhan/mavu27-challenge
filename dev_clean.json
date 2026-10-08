@@ -1,0 +1,56 @@
+{
+ "zs-4b-6254e8de": {
+  "metrics": {
+   "overall_accuracy": 0.7191135734072022,
+   "temporalgrounding_accuracy": 0.502262443438914,
+   "geometricrelation_accuracy": 0.7360594795539034,
+   "changedetection_accuracy": 0.6382978723404256,
+   "structurallayout_accuracy": 0.7476635514018691,
+   "consequence_accuracy": 0.9230769230769231,
+   "hypothetical_accuracy": 0.9076923076923077,
+   "perspectiveviewpoint_accuracy": 0.5240384615384616,
+   "objectlandcover_accuracy": 0.8048780487804879,
+   "causation_accuracy": 0.9714285714285714,
+   "trendpattern_accuracy": 0.7675675675675676,
+   "generalunderstand_accuracy": 0.9770114942528736,
+   "weighted_accuracy": 0.7159487281575315
+  }
+ },
+ "text-4b-f571bdb5": {
+  "metrics": {
+   "overall_accuracy": 0.4952908587257618,
+   "temporalgrounding_accuracy": 0.2986425339366516,
+   "geometricrelation_accuracy": 0.48698884758364314,
+   "changedetection_accuracy": 0.4734042553191489,
+   "structurallayout_accuracy": 0.514018691588785,
+   "consequence_accuracy": 0.9038461538461539,
+   "hypothetical_accuracy": 0.9076923076923077,
+   "perspectiveviewpoint_accuracy": 0.34134615384615385,
+   "objectlandcover_accuracy": 0.5,
+   "causation_accuracy": 0.8714285714285714,
+   "trendpattern_accuracy": 0.5837837837837838,
+   "generalunderstand_accuracy": 0.3333333333333333,
+   "weighted_accuracy": 0.48350563929494633
+  }
+ },
+ "zs-8b-4bit-029fe922": {
+  "missing": "dev_probs.json is no longer in the kernel output"
+ },
+ "ft-8b-4bit-16f-62f77933": {
+  "metrics": {
+   "overall_accuracy": 0.8088642659279779,
+   "temporalgrounding_accuracy": 0.6832579185520362,
+   "geometricrelation_accuracy": 0.7732342007434945,
+   "changedetection_accuracy": 0.7659574468085106,
+   "structurallayout_accuracy": 0.822429906542056,
+   "consequence_accuracy": 0.9038461538461539,
+   "hypothetical_accuracy": 0.9230769230769231,
+   "perspectiveviewpoint_accuracy": 0.7836538461538461,
+   "objectlandcover_accuracy": 0.8211382113821138,
+   "causation_accuracy": 0.9571428571428572,
+   "trendpattern_accuracy": 0.8378378378378378,
+   "generalunderstand_accuracy": 1.0,
+   "weighted_accuracy": 0.8129803624872298
+  }
+ }
+}

@@ -1,12 +1,8 @@
-# ReVA autopilot status (2026-10-08T22:07:47Z)
+# ReVA autopilot status (2026-10-08T22:13:40Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- saved ft-4b-16f-830869b1 (failed) to private dataset tubu9938/reva-run-ft-4b-16f-830869b1
-- saved ft-4b-32f-527078f0 (failed) to private dataset tubu9938/reva-run-ft-4b-32f-527078f0
-- job tubu9938/reva-ft-4b-16f-830869b1 complete; failed lanes: ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0'] 
-- collected ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
-- arena skipped this cycle: FileNotFoundError
+- arena: no average of the top runs beats ft-8b-4bit-16f-62f77933 on dev
 
 ## Leaderboard (top 8)
 
@@ -37,13 +33,12 @@
 | Causation Reasoning | 0.944 | 0.939 | 0.02 |
 | Consequence Reasoning | 0.980 | 0.980 | 0.00 |
 
-## Calibration (board minus local weighted dev)
+## Calibration (board minus local weighted dev, dev set unseen-v1)
 
 | run | dev weighted | board | diff |
 |---|---|---|---|
-| zs-4b-6254e8de | 0.7130 | 0.7177 | +0.0047 |
-| zs-8b-4bit-029fe922 | 0.7442 | 0.7410 | -0.0032 |
-| ft-8b-4bit-16f-62f77933 | 0.8175 | 0.8125 | -0.0050 |
+| zs-4b-6254e8de | 0.7159 | 0.7177 | +0.0018 |
+| ft-8b-4bit-16f-62f77933 | 0.8130 | 0.8125 | -0.0005 |
 
 ## Runs (newest first)
 
@@ -52,19 +47,19 @@
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-q35-4b-16f-e4ba68c0 | failed | nan | nan |  |  |
-| ft-8b-4bit-16f-62f77933 | ok | 0.8175 | 0.8115 | 10.058 | QLoRA fine-tune of Qwen3-VL-8B, 16 frames |
+| ft-8b-4bit-16f-62f77933 | ok | 0.8130 | 0.8089 | 10.058 | QLoRA fine-tune of Qwen3-VL-8B, 16 frames |
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-q35-4b-16f-e4ba68c0 | failed | nan | nan |  |  |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
-| zs-8b-4bit-029fe922 | ok | 0.7442 | 0.7354 | 10.889 | zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4 |
+| zs-8b-4bit-029fe922 | ok | nan | nan | 10.889 | zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4 |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
-| zs-4b-6254e8de | ok | 0.7130 | 0.7020 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
-| text-4b-f571bdb5 | ok | 0.4773 | 0.4807 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
+| zs-4b-6254e8de | ok | 0.7159 | 0.7191 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
+| text-4b-f571bdb5 | ok | 0.4835 | 0.4953 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
 
 Submissions used: 3 of 100. GPU hours, last 7 days: 30.3 of 30.
 Active job: none
