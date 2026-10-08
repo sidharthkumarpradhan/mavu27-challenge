@@ -1,8 +1,11 @@
-# ReVA autopilot status (2026-10-08T21:59:13Z)
+# ReVA autopilot status (2026-10-08T22:07:47Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- job tubu9938/reva-ft-4b-16f-830869b1 is running
+- saved ft-4b-16f-830869b1 (failed) to private dataset tubu9938/reva-run-ft-4b-16f-830869b1
+- saved ft-4b-32f-527078f0 (failed) to private dataset tubu9938/reva-run-ft-4b-32f-527078f0
+- job tubu9938/reva-ft-4b-16f-830869b1 complete; failed lanes: ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0'] 
+- collected ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
 - arena skipped this cycle: FileNotFoundError
 
 ## Leaderboard (top 8)
@@ -46,6 +49,8 @@
 
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
+| ft-4b-16f-830869b1 | failed | nan | nan |  |  |
+| ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-q35-4b-16f-e4ba68c0 | failed | nan | nan |  |  |
 | ft-8b-4bit-16f-62f77933 | ok | 0.8175 | 0.8115 | 10.058 | QLoRA fine-tune of Qwen3-VL-8B, 16 frames |
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
@@ -61,5 +66,5 @@
 | zs-4b-6254e8de | ok | 0.7130 | 0.7020 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
 | text-4b-f571bdb5 | ok | 0.4773 | 0.4807 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
 
-Submissions used: 3 of 100. GPU hours, last 7 days: 29.9 of 30.
-Active job: tubu9938/reva-ft-4b-16f-830869b1 ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
+Submissions used: 3 of 100. GPU hours, last 7 days: 30.3 of 30.
+Active job: none
