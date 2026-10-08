@@ -115,7 +115,8 @@ def cmd_colab(a) -> int:
         return 0
     notes: list[str] = []
     out = colab.run_next(_cfg(a), remote.load_queue(a.queue), Path(a.state), Path(a.work), session, from_env(), a.sha,
-                         a.hours, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), notes)
+                         a.hours, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), notes,
+                         publish=colab.StatePusher(Path(a.state)) if a.live else None)
     print("\n".join(notes))
     if a.outcome:
         Path(a.outcome).write_text(json.dumps({"ran": (out["ran"] or {}).get("run_id"), "more": out["more"],
@@ -217,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--probe", action="store_true")
     c.add_argument("--pending", action="store_true", help="exit 0 if a Colab entry is pending, else 1")
     c.add_argument("--check-token", action="store_true", help="check the stored login before a session")
+    c.add_argument("--live", action="store_true", help="push colab_live.json to the state branch while running")
     c.add_argument("--outcome")
     s = sub.add_parser("submit")
     s.add_argument("--run", required=True)

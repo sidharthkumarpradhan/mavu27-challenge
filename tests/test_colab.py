@@ -223,3 +223,65 @@ def test_the_token_check_names_what_is_wrong_without_printing_values(tmp_path):
     tok.write_text(json.dumps(good))
     ok = colab.check_token(tok, lambda info: None)
     assert ok.startswith("Colab login ok") and "SECRET" not in ok
+
+
+def test_a_session_reports_live_progress_and_pushes_it(tmp_path):
+    """Actions shows a job's log to the API only after the job ends, so a 5 h session was a black
+    box (8 Oct 2026). The session writes colab_live.json at every poll and pushes it."""
+    pushes = []
+    state = tmp_path / "state"
+    state.mkdir()
+    out = colab.run_next(cfg(), QUEUE, state, tmp_path / "work", colab.Colab(runner=FakeCLI(tmp_path)), FakeKaggle(),
+                         "abc", 5.0, "2026-10-09T00:00:00Z", [], publish=lambda: pushes.append(
+                             json.loads((state / "colab_live.json").read_text())["stage"]),
+                         poll_s=0, sleep=lambda s: None)
+    assert pushes[0] == "started" and "running" in pushes and pushes[-1] == "done"
+    live = json.loads((state / "colab_live.json").read_text())
+    assert live["run_id"] == out["ran"]["run_id"] and live["gpu"] == "A100" and live["status"] == "ok"
+    assert live["units_before"] == 90.0 and live["units_after"] == 85.0
+
+
+def test_live_progress_pushes_to_the_state_branch_at_most_every_20_minutes(tmp_path):
+    import subprocess
+
+    def git(*args, cwd=tmp_path):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
+                              capture_output=True, text=True).stdout
+
+    git("init", "-q", "--bare", "remote.git")
+    git("clone", "-q", "remote.git", "seed")
+    git("checkout", "-q", "-b", "state", cwd=tmp_path / "seed")
+    git("commit", "-q", "--allow-empty", "-m", "s", cwd=tmp_path / "seed")
+    git("push", "-q", "origin", "state", cwd=tmp_path / "seed")
+    git("clone", "-q", "-b", "state", "remote.git", "state")
+    now = [0.0]
+    push = colab.StatePusher(tmp_path / "state", clock=lambda: now[0])
+    for t, stage in [(0, "started"), (300, "running"), (1500, "running2")]:
+        now[0] = t
+        (tmp_path / "state" / "colab_live.json").write_text(json.dumps({"stage": stage}))
+        push()
+    shown = git("show", "state:colab_live.json", cwd=tmp_path / "remote.git")
+    assert json.loads(shown)["stage"] == "running2"
+    assert git("rev-list", "--count", "state", cwd=tmp_path / "remote.git").strip() == "3"  # seed + 2 pushes
+
+
+def test_a_failed_progress_push_never_stops_the_session(capsys):
+    calls = []
+
+    def git(args):
+        calls.append(args)
+        return 1 if "pull" in args else 0
+
+    colab.StatePusher(Path("."), git=git)()
+    assert calls[-1] == ["rebase", "--abort"] and "not pushed" in capsys.readouterr().out
+
+
+def test_status_shows_the_colab_session_in_progress(tmp_path):
+    assert autopilot.colab_note(tmp_path) is None
+    (tmp_path / "colab_live.json").write_text(json.dumps({"run_id": "ft-c-1", "gpu": "A100", "stage": "running",
+                                                          "hours_in": 1.25, "updated": "t", "units_before": 90.0,
+                                                          "last": "train step 120 loss 0.41"}))
+    note = autopilot.colab_note(tmp_path)
+    assert "ft-c-1 on A100, 1.2 h in" in note and "loss 0.41" in note
+    (tmp_path / "colab_live.json").write_text(json.dumps({"stage": "done"}))
+    assert autopilot.colab_note(tmp_path) is None
