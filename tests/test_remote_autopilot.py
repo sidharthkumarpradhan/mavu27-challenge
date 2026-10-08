@@ -423,3 +423,20 @@ def test_caller_notes_reach_status(tmp_path):
     autopilot.cycle(cfg(), QUEUE, tmp_path / "s", tmp_path / "w", FakeKaggle(), "sha", "me", now=NOW,
                     fetch_board=board_rows, notes=["Codabench login ok"])
     assert "- Codabench login ok" in (tmp_path / "s" / "STATUS.md").read_text()
+
+
+def test_a_broken_image_does_not_use_up_a_lanes_retries():
+    # 8 Oct 2026: every fine-tune died adding LoRA because the Kaggle image's torchao was too old
+    # for peft; two such failures dropped the 32-frame run from the queue
+    torchao = "ImportError: Found an incompatible version of torchao. Found version 0.10.0"
+    runs = [{"run_id": "a", "status": "failed", "error": torchao}] * 2 + [
+        {"run_id": "b", "status": "failed", "error": "RuntimeError: inference alone needs 12.7 h"},
+        {"run_id": "c", "status": "failed", "error": torchao}]
+    assert autopilot.failures(runs) == {"a": 0, "b": 1, "c": 0}
+    many = [{"run_id": "a", "status": "failed", "error": torchao}] * (autopilot.ENV_FREE_TRIES + 2)
+    assert autopilot.failures(many) == {"a": 2}  # a fix that does not work cannot loop forever
+
+
+def test_kernel_removes_the_images_torchao():
+    script = remote.kernel_script([], "sha", "https://example.com/repo", ["peft==0.21.2"])
+    assert script.index("pip uninstall -y -q torchao") > script.index("pip install -q ")
