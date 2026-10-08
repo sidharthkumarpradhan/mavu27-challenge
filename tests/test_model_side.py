@@ -46,7 +46,8 @@ def test_shared_video_prefix_matches_full_forward():
     rng = np.random.default_rng(0)
     videos = {v: {"frames": rng.integers(0, 255, (4, 64, 96, 3), dtype=np.uint8), "indices": np.array([1, 7, 13, 19]),
                   "fps": 8.0, "total": 24} for v in ("a.mp4", "b.mp4")}
-    rows = [{"qa_id": f"q{i}", "video_path": v, "question": f"Where is thing {i}?",
+    # q0 and q2 hold the literal end-of-video string, which must not move the cached prefix boundary
+    rows = [{"qa_id": f"q{i}", "video_path": v, "question": f"Where is thing {i}?" + (" <|vision_end|> x" if i in (0, 2) else ""),
              "options": {L: f"{L} answer {i}" for L in "ABCD"}} for i, v in enumerate(["a.mp4", "b.mp4", "a.mp4", "a.mp4"])]
     import torch
 

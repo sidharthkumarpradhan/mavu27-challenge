@@ -73,7 +73,6 @@ class VLM:
             raise ValueError(f"answer letters are not single tokens for {mcfg['id']}: {ids}")
         self.letter_ids = [i[0] for i in ids]
         self.vision_end = getattr(self.processor, "vision_end_token", "<|vision_end|>")
-        self.vision_end_id = tok.convert_tokens_to_ids(self.vision_end)
 
     def chat_text(self, row: dict, video: dict | None, order: list[str]) -> str:
         """The templated prompt: video placeholder (if any), question, options, answer cue."""
@@ -116,27 +115,33 @@ class VLM:
         """The CausalLM under any PEFT wrapper. LoRA layers sit inside it, so they still apply."""
         return self.model.get_base_model() if hasattr(self.model, "get_base_model") else self.model
 
+    def tail_ids(self, row: dict, video: dict, order: list[str]) -> torch.Tensor:
+        """(1, L) token ids of the prompt after the video: question, options, answer cue. The video
+        comes first in the template, so its first end-of-video marker is the split, whatever the
+        question text holds."""
+        text = self.chat_text(row, video, order)
+        tail = text[text.index(self.vision_end) + len(self.vision_end):]
+        return self.processor.tokenizer(tail, add_special_tokens=False, return_tensors="pt").input_ids
+
     def encode_video(self, row: dict, video: dict):
-        """KV cache of the prompt up to and including the end-of-video token."""
+        """KV cache of the prompt up to and including the end of the video."""
         batch = self.inputs(row, video, list(LETTERS))
-        ids = batch["input_ids"]
-        end = (ids[0] == self.vision_end_id).nonzero()
-        if len(end) == 0:
-            raise ValueError(f"no end-of-video token in the prompt for {row['qa_id']}")
-        n = int(end[-1]) + 1
+        ids, tail = batch["input_ids"], self.tail_ids(row, video, list(LETTERS)).to(self.device)
+        n = ids.shape[1] - tail.shape[1]
+        # the processor expands the video into several marked frame groups, so the boundary comes from
+        # the question's own tokens; if they do not line up exactly, sharing would score other text
+        if n <= 0 or not torch.equal(ids[:, n:], tail):
+            raise ValueError(f"prompt does not split cleanly after the video for {row['qa_id']}")
         kw = {k: (v[:, :n] if v.dim() >= 2 and v.shape[:2] == ids.shape else v) for k, v in batch.items()}
         return self._base().model(**kw, use_cache=True).past_key_values
 
     def suffix_logits(self, cache, row: dict, video: dict, order: list[str]) -> torch.Tensor:
         """(4,) letter logits for one question on top of the video prefix cache (left unchanged)."""
-        text = self.chat_text(row, video, order)
-        tail = text[text.rindex(self.vision_end) + len(self.vision_end):]
-        ids = self.processor.tokenizer(tail, add_special_tokens=False, return_tensors="pt").input_ids
+        ids = self.tail_ids(row, video, order).to(self.device)
         base = self._base()
         # each question runs on a copy: linear-attention layers (Qwen3.5) keep a recurrent state that
         # cannot be cropped back, and a copy of a few hundred MB on the GPU takes about a millisecond
-        h = base.model(input_ids=ids.to(self.device), past_key_values=copy.deepcopy(cache),
-                       use_cache=True).last_hidden_state
+        h = base.model(input_ids=ids, past_key_values=copy.deepcopy(cache), use_cache=True).last_hidden_state
         return base.lm_head(h[:, -1])[0, self.letter_ids].float()
 
     @torch.no_grad()
