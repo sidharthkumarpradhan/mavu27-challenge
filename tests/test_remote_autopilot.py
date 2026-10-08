@@ -283,11 +283,11 @@ def test_cycle_waits_when_every_account_is_out_of_quota(tmp_path):
 
 def test_gpu_pacing_counts_each_account_apart(tmp_path):
     state, work, k = tmp_path / "state", tmp_path / "work", FakeKaggle()
-    registry.append(state / "jobs.jsonl", {"kernel": "first/reva-a", "hours": 25.0,
+    registry.append(state / "jobs.jsonl", {"kernel": "first/reva-a", "hours": 26.0,
                                             "collected": autopilot.iso(NOW - dt.timedelta(days=1))})
     assert autopilot.gpu_hours(registry.read(state / "jobs.jsonl"), NOW, user="second") == 0
     autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["first", "second"], now=NOW, fetch_board=board_rows)
-    assert k.pushed[0].startswith("second/")  # 25 h + an 11.5 h job would pass the first account's 30 h
+    assert k.pushed[0].startswith("second/")  # the first account has 3.5 h left, too little for a job
 
 
 def offline_row(run_id, finished, kernel="second/reva-a"):
@@ -364,10 +364,10 @@ def test_cycle_respects_auto_submit_off_and_quota(tmp_path):
     k = FakeKaggle()
     autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
     k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
-    # a 25 h job leaves too little weekly quota for another 11.5 h session
+    # a 26 h job leaves 3.5 h of weekly quota, too little for even a short session
     client = FakeClient()
     out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=False,
-                          now=NOW + dt.timedelta(hours=25), fetch_board=board_rows)
+                          now=NOW + dt.timedelta(hours=26), fetch_board=board_rows)
     assert not client.submitted and any("automatic submission off" in n for n in out["notes"])
     assert out["pushed"] is None and any("quota" in n for n in out["notes"])
 
@@ -440,3 +440,32 @@ def test_a_broken_image_does_not_use_up_a_lanes_retries():
 def test_kernel_removes_the_images_torchao():
     script = remote.kernel_script([], "sha", "https://example.com/repo", ["peft==0.21.2"])
     assert script.index("pip uninstall -y -q torchao") > script.index("pip install -q ")
+
+
+class TimedKaggle(FakeKaggle):
+    def push(self, kdir, timeout_s=None, accelerator=None):
+        self.timeout_s, self.script = timeout_s, (kdir / "job.py").read_text()
+        return super().push(kdir, timeout_s, accelerator)
+
+
+def test_a_job_shrinks_to_the_hours_an_account_has_left(tmp_path):
+    # 8 Oct 2026: after one full job the second account had about 6 h left of its 30, and pacing
+    # would have left it idle for days; a shorter job trains less but still runs
+    state, work, k = tmp_path / "state", tmp_path / "work", TimedKaggle()
+    registry.append(state / "jobs.jsonl", {"kernel": "second/reva-a", "hours": 24.0,
+                                            "collected": autopilot.iso(NOW - dt.timedelta(hours=1))})
+    out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["second"], now=NOW, fetch_board=board_rows)
+    assert out["pushed"]["hours"] == 5.5 and k.timeout_s == 5.5 * 3600  # 30 - 24 - 0.5
+    lanes = json.loads(k.script.split("LANES = json.loads(")[1].split(")\n")[0])
+    lanes = json.loads(lanes)
+    assert {l["job"]["max_hours"] for l in lanes} == {4.5}  # the usual hour for setup
+    assert out["pushed"]["runs"] == [l["run_id"] for l in lanes]  # same experiments, same ids
+    assert "sized to the 5.5 h account 1 has left" in (state / "STATUS.md").read_text()
+
+
+def test_an_account_with_too_little_left_still_waits(tmp_path):
+    state, work, k = tmp_path / "state", tmp_path / "work", FakeKaggle()
+    registry.append(state / "jobs.jsonl", {"kernel": "second/reva-a", "hours": 26.0,
+                                            "collected": autopilot.iso(NOW - dt.timedelta(hours=1))})
+    out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["second"], now=NOW, fetch_board=board_rows)
+    assert out["pushed"] is None and not k.pushed  # 3.5 h cannot train and score

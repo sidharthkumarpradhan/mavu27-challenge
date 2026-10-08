@@ -60,6 +60,9 @@ def gpu_hours(jobs: list[dict], now: dt.datetime, days: int = 7, user: str | Non
                and (user is None or j.get("kernel", "").split("/")[0].lower() == user.lower()))
 
 
+MIN_JOB_HOURS = 4.0  # below this a job cannot train and still score dev and test
+QUOTA_MARGIN_H = 0.5  # setup and our own rounding against Kaggle's count
+
 NO_INTERNET = ("Could not resolve host", "Temporary failure in name resolution")
 
 
@@ -409,13 +412,15 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 out["resting"] = True  # keep cycling: nothing else starts the loop again at the retry time
                 continue
             used = gpu_hours(jobs, now, user=user)
-            if used + C.get(cfg, "remote.max_hours") > C.get(cfg, "remote.weekly_gpu_hours"):
+            # a shorter job on the hours left beats an idle account; training sizes itself to it
+            hours = min(C.get(cfg, "remote.max_hours"), C.get(cfg, "remote.weekly_gpu_hours") - used - QUOTA_MARGIN_H)
+            if hours < MIN_JOB_HOURS:
                 notes.append(f"GPU quota pacing on Kaggle account {n}: {used:.1f} h used in 7 days")
                 continue
             kdir = work / "kernel"
-            slug = remote.build(cfg, lanes, sha, kdir, user)
+            slug = remote.build(cfg, lanes, sha, kdir, user, hours=hours)
             try:
-                pushed = kaggle.push(kdir, timeout_s=int(3600 * C.get(cfg, "remote.max_hours")),
+                pushed = kaggle.push(kdir, timeout_s=int(3600 * hours),
                                      accelerator=C.get(cfg, "remote.accelerator"))
             except KaggleError as e:
                 # The weekly GPU quota (hit on 7 Oct 2026) clears by itself: try the next account, and
@@ -427,12 +432,14 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 notes.append(f"Kaggle weekly GPU quota reached on account {n}")
                 continue
             active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
-                      "url": pushed.url}
+                      "url": pushed.url, "hours": round(hours, 2)}
             active_path.write_text(json.dumps(active, indent=1))
             out["pushed"] = active
             out.pop("push_refused", None)
             out.pop("resting", None)
-            notes.append(f"pushed {slug} with {active['runs']}")
+            notes.append(f"pushed {slug} with {active['runs']}"
+                         + (f", sized to the {hours:.1f} h account {n} has left this week"
+                            if hours < C.get(cfg, "remote.max_hours") else ""))
             break
         else:
             if lanes:

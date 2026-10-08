@@ -102,10 +102,19 @@ print("EXIT", max(codes), flush=True)
 '''
 
 
-def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: str) -> str:
-    """Write kernel-metadata.json and job.py into out_dir. Returns the kernel slug."""
+def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: str, hours: float | None = None) -> str:
+    """Write kernel-metadata.json and job.py into out_dir. Returns the kernel slug.
+
+    `hours` shortens the session to what the account has left this week. Each lane keeps the usual
+    margin for setup, and training sizes itself to the shorter lane (reva.job.train_deadline). The
+    run ids do not change: the same experiment, given less time.
+    """
     if not lanes:
         raise ValueError("no lanes to run")
+    if hours is not None:
+        setup = C.get(base, "remote.max_hours") - C.get(base, "job.max_hours")
+        lanes = [C.override(c, {"job.max_hours": min(C.get(c, "job.max_hours"), round(hours - setup, 2))})
+                 for c in lanes]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = f"{user}/reva-{lanes[0]['run_id']}"[:60].rstrip("-").lower()
