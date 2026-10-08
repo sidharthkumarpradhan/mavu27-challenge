@@ -81,8 +81,11 @@ class VLM:
         if video is not None and self.cfg.get("timestamps_in_text"):
             times = [float(i) / float(video["fps"]) for i in video["indices"]]
         content.append({"type": "text", "text": prompt_text(row, order, times)})
+        # chat_template_kwargs: Qwen3.5 opens a <think> block unless enable_thinking is false, and the
+        # answer letter must be the very next token
         return self.processor.apply_chat_template([{"role": "user", "content": content}],
-                                                  add_generation_prompt=True, tokenize=False)
+                                                  add_generation_prompt=True, tokenize=False,
+                                                  **self.cfg.get("chat_template_kwargs", {}))
 
     def inputs(self, row: dict, video: dict | None, order: list[str]) -> dict:
         """Tokenized model input for one question. video=None gives a text-only probe."""
