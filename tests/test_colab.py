@@ -188,3 +188,16 @@ def run_with(tmp_path, cli, **kw):
     out = colab.run_next(cfg(), QUEUE, state, tmp_path / "work", colab.Colab(runner=cli), FakeKaggle(), "abc",
                          5.0, "2026-10-09T00:00:00Z", notes, poll_s=0, sleep=lambda s: None, **kw)
     return out, notes, state
+
+
+def test_the_pending_check_the_autopilot_uses_to_start_sessions(tmp_path, capsys):
+    from reva import cli
+
+    state = tmp_path / "state"
+    state.mkdir()
+    q = tmp_path / "q.yaml"
+    q.write_text("- name: ft-c\n  backend: colab\n  set: {train.enabled: true}\n")
+    assert cli.main(["colab", "--pending", "--state", str(state), "--queue", str(q)]) == 0
+    assert "ft-c-" in capsys.readouterr().out
+    q.write_text("- name: ft-k\n  set: {train.enabled: true}\n")
+    assert cli.main(["colab", "--pending", "--state", str(state), "--queue", str(q)]) == 1

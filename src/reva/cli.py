@@ -98,9 +98,14 @@ def cmd_colab(a) -> int:
     """One Colab session (reva.colab): the next Colab queue entry, or with --probe a short GPU check."""
     import datetime as dt
 
-    from reva import colab, remote
+    from reva import autopilot, colab, remote
     from reva.kaggle import from_env
 
+    if a.pending:  # exit 0 when a Colab entry waits; the autopilot then starts a session
+        runs = autopilot.read_runs(Path(a.state))
+        nxt = colab.next_lane(_cfg(a), remote.load_queue(a.queue), runs)
+        print(f"Colab entry pending: {nxt[0]['run_id']} on {nxt[1]}" if nxt else "no Colab entry pending")
+        return 0 if nxt else 1
     session = colab.Colab()
     if a.probe:
         print(colab.probe(session, a.gpu or "T4"))
@@ -207,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--hours", type=float, default=5.0, help="session length; an Actions job lasts at most 6 h")
     c.add_argument("--gpu", default="", help="GPU for --probe")
     c.add_argument("--probe", action="store_true")
+    c.add_argument("--pending", action="store_true", help="exit 0 if a Colab entry is pending, else 1")
     c.add_argument("--outcome")
     s = sub.add_parser("submit")
     s.add_argument("--run", required=True)

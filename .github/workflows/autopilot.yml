@@ -155,6 +155,21 @@ jobs:
           git config user.email "sidharthp@assignall.ai"
           claude -p "$(cat .github/autopilot/fix_prompt.md)" --allowedTools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode dontAsk
 
+      - name: Start a Colab session when a Colab entry is pending (reva.colab)
+        if: always() && vars.COLAB != 'off'
+        run: |
+          [ -d state ] || exit 0
+          python -m reva.cli colab --pending --state state || exit 0
+          runs=$(gh run list --workflow colab.yml --repo "$GITHUB_REPOSITORY" --limit 5 --json status,conclusion)
+          if [ "$(echo "$runs" | jq '[.[] | select(.status != "completed")] | length')" != "0" ]; then
+            echo "a Colab session is already running or queued"; exit 0
+          fi
+          # a failed session needs a fix, not a retry every 20 minutes (a broken login uses no units but loops)
+          if [ "$(echo "$runs" | jq -r '.[0].conclusion // ""')" = "failure" ]; then
+            echo "::warning::the last Colab session failed; not starting another until it is fixed"; exit 0
+          fi
+          gh workflow run colab.yml --ref main --repo "$GITHUB_REPOSITORY" || echo "::warning::could not start a Colab session"
+
       - name: Start the next job while a job or a submission is open
         if: always()
         run: |
