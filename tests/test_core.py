@@ -105,3 +105,15 @@ def test_validate_catches_every_codabench_rule(tmp_path):
         package.validate(_zip(tmp_path, dup), test, "list")
     with pytest.raises(ValueError, match="only predictions.json"):
         package.validate(_zip(tmp_path, ok, name="sub/predictions.json"), test, "id_map")
+
+
+def test_dev_leaves_out_questions_fit_already_holds():
+    """1,456 of 2,000 val questions are exact train copies (8 Oct 2026). A copy in dev measures
+    recall, not the task, so dev drops it, whatever letter order the copy shows its options in."""
+    fit = make_rows("train", 1)
+    copy = {**fit[0], "qa_id": "val_x", "options": dict(zip("ABCD", reversed(list(fit[0]["options"].values()))))}
+    copy["correct_answer"] = "ABCD"[3 - "ABCD".index(fit[0]["correct_answer"])]  # same answer text, new letter
+    other_answer = {**copy, "qa_id": "val_y", "correct_answer": "ABCD"[(3 - "ABCD".index(fit[0]["correct_answer"]) + 1) % 4]}
+    fresh = make_rows("val", 1)
+    dev = data.unseen([copy, other_answer, *fresh, {**fresh[0], "qa_id": "val_dup"}], fit)
+    assert [r["qa_id"] for r in dev] == ["val_y", *[r["qa_id"] for r in fresh]]

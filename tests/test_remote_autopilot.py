@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from reva import autopilot, package, registry, remote
+from reva import autopilot, data, package, registry, remote
 from reva import config as C
 from reva.codabench import CodabenchError
+from reva.data import DEV_SET
 from reva.kaggle import KaggleError, Push
 from tests.conftest import make_rows
 
@@ -99,7 +100,7 @@ def test_each_push_gets_its_own_kernel(tmp_path):
 
 def run_row(run_id, w, test_n=4000):
     return {"run_id": run_id, "status": "ok", "zip": f"{run_id}.zip", "n": {"test": test_n},
-            "metrics": {"weighted_accuracy": w, "overall_accuracy": w}, "kernel": "u/k"}
+            "metrics": {"weighted_accuracy": w, "overall_accuracy": w}, "kernel": "u/k", "dev_set": DEV_SET}
 
 
 def sub_row(run_id, w, status="Finished", day="2026-10-07", fmt="fill_test", sid=1):
@@ -168,7 +169,8 @@ class FakeKaggle:
             (d / "log.txt").write_text("Traceback: boom\n")
             if self.lanes_ok:
                 (d / "run.json").write_text(json.dumps({
-                    "metrics": {"weighted_accuracy": 0.6, "overall_accuracy": 0.61}, "hours": 2.0, "zip": f"{run_id}.zip",
+                    "metrics": {"weighted_accuracy": 0.6, "overall_accuracy": 0.61}, "dev_set": DEV_SET, "hours": 2.0,
+                    "zip": f"{run_id}.zip",
                     "n": {"test": 4000}, "train": None, "timings": {}, "versions": {}, "config": RUN_CONFIG,
                     "finished": "2026-10-07T11:00:00Z"}))
                 (d / f"{run_id}.zip").write_bytes(b"PK")
@@ -568,3 +570,35 @@ def test_restore_copies_saved_state_where_the_job_resumes(tmp_path, capsys):
 def test_stash_names_fit_kaggle():
     ref = autopilot.stash_ref("Second", "ft-8b-4bit-16f-62f77933" + "x" * 40)
     assert ref.startswith("second/reva-run-ft-8b") and len(ref.split("/")[1]) <= 50
+
+
+def test_older_runs_are_rescored_on_the_clean_dev_set_before_any_comparison(tmp_path, ann):
+    """Runs recorded before dev dropped the train copies get their dev score again from their own
+    dev_probs.json; a run whose probabilities are gone has no fair score and is never picked."""
+    c, state, work = C.override(cfg(), {"dev.holdout_frac": 0.1, "dev.seed": 0, "dev.min_cell": 1}), tmp_path / "s", tmp_path / "w"
+    shutil.copytree(ann, work / "annotations")
+    old_dev = data.load_split(ann, "val") + data.load_split(ann, "train")  # covers any dev the splits make
+    letters = {r["qa_id"]: r.get("correct_answer") or "A" for r in old_dev}
+
+    class K(FakeKaggle):
+        def output(self, slug, dest, file_pattern=None):
+            if "gone" in slug:
+                return [], ""
+            (dest / "old").mkdir(parents=True, exist_ok=True)
+            (dest / "old" / "dev_probs.json").write_text(json.dumps(
+                {q: [1.0 if L == a else 0.0 for L in "ABCD"] for q, a in letters.items()}))
+            return [], ""
+
+    old = {**run_row("old", 0.99), "kernel": "u/k-old"}
+    gone = {**run_row("gone", 0.98), "kernel": "u/k-gone"}
+    del old["dev_set"], gone["dev_set"]
+    state.mkdir()
+    for r in (old, gone):
+        registry.append(state / "runs.jsonl", r)
+    clean = autopilot.rescore(K(), registry.read(state / "runs.jsonl"), state, work, c)
+    assert clean["old"]["metrics"]["weighted_accuracy"] == 1.0 and "missing" in clean["gone"]
+    runs = autopilot.fair(registry.read(state / "runs.jsonl"), clean)
+    assert autopilot.candidate(runs, [])["run_id"] == "old"
+    assert autopilot.candidate(runs, [sub_row("old", 0.99)]) is None  # "gone" is shown but never picked
+    subs = autopilot.fair_subs([sub_row("gone", 0.98)], runs)
+    assert subs[0]["dev_weighted"] is None and autopilot.gate(run_row("new", 0.5), subs, cfg(), NOW)[0]

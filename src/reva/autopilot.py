@@ -10,6 +10,7 @@ State lives in a directory that the workflow keeps on the `state` branch:
 - submissions.jsonl  one row per Codabench submission, updated by appending newer rows
 - blocked.jsonl      runs the pre-upload checks stopped (reva.preflight), never retried
 - arena.json         the run ids the arena last averaged (reva.arena), so it reruns only on new runs
+- dev_clean.json     dev scores of runs recorded before dev left out train copies (data.unseen)
 - board.csv          every leaderboard row ever seen
 - STATUS.md          the human summary
 The repo is public. Nothing here holds test predictions or probabilities.
@@ -34,7 +35,7 @@ import tarfile
 import traceback
 from pathlib import Path
 
-from reva import arena, board, data, package, preflight, registry, remote
+from reva import arena, board, data, package, preflight, registry, remote, score
 from reva import config as C
 from reva.codabench import DONE, FAILED, KNOWN_REASONS, CodabenchError, scores
 from reva.kaggle import DONE as K_DONE
@@ -215,7 +216,7 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
     if left <= 0 or ((deadline - now).days > 7 and left <= C.get(cfg, "submit.reserve")):
         return False, f"submission budget: {left} left, reserve {C.get(cfg, 'submit.reserve')}"
     mine = run["metrics"]["weighted_accuracy"]
-    best = max((s["dev_weighted"] for s in used), default=None)
+    best = max((s["dev_weighted"] for s in used if s.get("dev_weighted") is not None), default=None)
     if best is not None and mine < best + C.get(cfg, "submit.min_gain"):
         return False, f"dev {mine:.4f} does not beat best submitted {best:.4f} by {C.get(cfg, 'submit.min_gain')}"
     return True, f"dev {mine:.4f}" + (f" vs best submitted {best:.4f}" if best is not None else " (first submission)")
@@ -223,10 +224,58 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
 
 def candidate(runs: list[dict], subs: list[dict], blocked: set[str] = frozenset()) -> dict | None:
     """Best finished full-test run by weighted dev accuracy that has no live submission yet and
-    was not stopped by the pre-upload checks."""
+    was not stopped by the pre-upload checks. A run without a fair dev score is never picked."""
     taken = {s["run_id"] for s in subs if s["status"] not in FAILED} | set(blocked)
-    ok = [r for r in runs if r["status"] == "ok" and r.get("zip") and r["run_id"] not in taken]
+    ok = [r for r in runs if r["status"] == "ok" and r.get("zip") and r["run_id"] not in taken
+          and "weighted_accuracy" in (r.get("metrics") or {})]
     return max(ok, key=lambda r: r["metrics"]["weighted_accuracy"], default=None)
+
+
+def rescore(kaggle, runs: list[dict], state: Path, work: Path, cfg: dict) -> dict:
+    """Dev scores, on today's dev set, of the runs recorded before it (data.DEV_SET), from their
+    private dev_probs.json, kept in dev_clean.json. Today's dev set is a subset of the old one, so
+    nothing is predicted again. A run whose probabilities are gone (its kernel slug was reused
+    before 8 Oct 2026) is marked missing: it has no fair score and is never picked or compared.
+    Download errors raise, and the cycle tries again next time."""
+    path = state / "dev_clean.json"
+    done = json.loads(path.read_text()) if path.exists() else {}
+    todo = [r for r in runs if r["status"] == "ok" and r.get("dev_set") != data.DEV_SET and r["run_id"] not in done]
+    if not todo:
+        return done
+    ann = work / "annotations"
+    data.fetch_annotations(ann, C.get(cfg, "data.hf_repo"))
+    sp = data.make_splits(ann, C.get(cfg, "dev.holdout_frac"), C.get(cfg, "dev.seed"))
+    for r in todo:
+        try:
+            probs = arena.mean([arena.load_probs(kaggle, m, work, "dev_probs.json") for m in r.get("members") or [r]])
+        except FileNotFoundError:
+            done[r["run_id"]] = {"missing": "dev_probs.json is no longer in the kernel output"}
+            continue
+        if any(q["qa_id"] not in probs for q in sp["dev"]):
+            done[r["run_id"]] = {"missing": "scored on a dev set that does not cover today's"}
+            continue
+        preds = {q["qa_id"]: data.LETTERS[max(range(4), key=probs[q["qa_id"]].__getitem__)] for q in sp["dev"]}
+        done[r["run_id"]] = {"metrics": score.summary(sp["dev"], preds, sp["test"], C.get(cfg, "dev.min_cell"))}
+        path.write_text(json.dumps(done, indent=1))
+    path.write_text(json.dumps(done, indent=1))
+    return done
+
+
+def fair(runs: list[dict], clean: dict) -> list[dict]:
+    """runs with dev metrics on today's dev set. An older run takes its score from `clean`
+    (rescore); one without a score there keeps its row with empty metrics: shown, never picked."""
+    out = []
+    for r in runs:
+        if r.get("status") == "ok" and r.get("dev_set") != data.DEV_SET:
+            r = {**r, "metrics": clean.get(r["run_id"], {}).get("metrics", {})}
+        out.append(r)
+    return out
+
+
+def fair_subs(subs: list[dict], runs: list[dict]) -> list[dict]:
+    """Submissions with dev_weighted from fair(runs): None when the run has no fair dev score."""
+    w = {r["run_id"]: r["metrics"].get("weighted_accuracy") for r in runs if r.get("status") == "ok"}
+    return [{**s, "dev_weighted": w.get(s["run_id"])} for s in subs]
 
 
 def submission_zip(kaggle, run: dict, fmt: str, cfg: dict, work: Path) -> tuple[Path, list[dict], dict]:
@@ -289,6 +338,7 @@ def collect(kaggle, active: dict, work: Path, now: dt.datetime) -> tuple[list[di
         if rj.exists():
             r = json.loads(rj.read_text())
             rows.append({"run_id": run_id, "status": "ok", "kernel": active["kernel"], "metrics": r["metrics"],
+                         "dev_set": r.get("dev_set"),
                          "hours": r["hours"], "zip": r["zip"], "n": r["n"], "train": r["train"],
                          "timings": r["timings"], "versions": r["versions"], "why": r["config"].get("why", ""),
                          "config": summarize_config(r["config"]), "finished": r["finished"], "sha": active["sha"]})
@@ -325,9 +375,9 @@ def status_md(cfg: dict, rows: list[dict], runs: list[dict], subs: list[dict], a
                   "| task | leader | ours | overall points lost |", "|---|---|---|---|"]
         for g in board.gap(rows, best["scores"], TEST_COUNTS):
             lines.append(f"| {g['task']} | {g['leader']:.3f} | {g['ours']:.3f} | {g['lost'] * 100:.2f} |")
-        lines += ["", "## Calibration (board minus local weighted dev)", "", "| run | dev weighted | board | diff |",
-                  "|---|---|---|---|"]
-        for s in fin:
+        lines += ["", f"## Calibration (board minus local weighted dev, dev set {data.DEV_SET})", "",
+                  "| run | dev weighted | board | diff |", "|---|---|---|---|"]
+        for s in (s for s in fin if s.get("dev_weighted") is not None):
             b = s["scores"].get("overall_accuracy", 0)
             lines.append(f"| {s['run_id']} | {s['dev_weighted']:.4f} | {b:.4f} | {b - s['dev_weighted']:+.4f} |")
     lines += ["", "## Runs (newest first)", "", "| run | status | dev weighted | dev overall | hours | why |",
@@ -419,8 +469,17 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         else:
             notes.append(f"job {active['kernel']} is {kstate}")
 
+    # 3a. every run on the same dev set: older runs are rescored once (data.unseen)
+    clean_path = state / "dev_clean.json"
+    try:
+        clean, settled = rescore(kaggle, registry.read(state / "runs.jsonl"), state, work, cfg), True
+    except Exception as e:  # never stops the loop; nothing is submitted until every run is comparable
+        traceback.print_exc()
+        clean, settled = json.loads(clean_path.read_text()) if clean_path.exists() else {}, False
+        notes.append(f"dev rescoring incomplete this cycle: {type(e).__name__}")
+
     # 3b. arena: an average of the best runs competes with them on dev
-    runs = registry.read(state / "runs.jsonl")
+    runs = fair(registry.read(state / "runs.jsonl"), clean)
     seen_path = state / "arena.json"
     seen = json.loads(seen_path.read_text())["considered"] if seen_path.exists() else []
     if len(arena.eligible(runs)) >= 2 and sorted(r["run_id"] for r in arena.eligible(runs)) != sorted(seen):
@@ -441,10 +500,12 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
 
     # 4. gated submission: the best run not yet submitted, from any cycle
     blocked = {b["run_id"] for b in registry.read(state / "blocked.jsonl")}
-    r = candidate(registry.read(state / "runs.jsonl"), subs, blocked)
+    runs = fair(registry.read(state / "runs.jsonl"), clean)
+    r = candidate(runs, subs, blocked)
     if r:
-        notes.append(preflight.forecast(r, subs, rows[0].get("overall_accuracy") if rows else None))
-        allowed, why = gate(r, subs, cfg, now)
+        fsubs = fair_subs(subs, runs)
+        notes.append(preflight.forecast(r, fsubs, rows[0].get("overall_accuracy") if rows else None))
+        allowed, why = gate(r, fsubs, cfg, now) if settled else (False, "older runs' dev scores not settled yet")
         if not allowed or not auto_submit or not client:
             notes.append(f"not submitting {r['run_id']}: "
                          f"{why if not allowed else 'automatic submission off' if not auto_submit else 'no Codabench login'}")
@@ -538,6 +599,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     # A refused push also counts: nothing else would start the loop again once the quota resets.
     out["waiting"] = (bool(active) or out.get("push_refused", False) or out.get("resting", False)
                       or any(s["status"] not in DONE | FAILED for s in subs))
-    (state / "STATUS.md").write_text(status_md(cfg, rows, runs, subs, active, jobs, now, notes))
+    shown = fair(runs, clean)
+    (state / "STATUS.md").write_text(status_md(cfg, rows, shown, fair_subs(subs, shown), active, jobs, now, notes))
     out["notes"] = notes
     return out

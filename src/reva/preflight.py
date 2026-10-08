@@ -131,7 +131,7 @@ def check(zip_path, test: list[dict], probs: dict[str, list[float]], fmt: str, c
 def projected(dev_weighted: float, subs: list[dict]) -> tuple[float, int]:
     """Expected board overall accuracy, and how many scored submissions the correction rests on."""
     gaps = [s["scores"][OVERALL] - s["dev_weighted"] for s in subs
-            if s["status"] in DONE and OVERALL in (s.get("scores") or {})]
+            if s["status"] in DONE and OVERALL in (s.get("scores") or {}) and s.get("dev_weighted") is not None]
     return dev_weighted + (sum(gaps) / len(gaps) if gaps else 0.0), len(gaps)
 
 

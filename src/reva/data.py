@@ -7,6 +7,11 @@ Test shares its videos with train (1,012 of 1,014), so the hidden test asks new 
 seen videos. A faithful local check therefore holds out questions, not videos. The official val
 split does this already, but it has almost no ERA_Tra questions while test has 1,285. So the dev
 set is val plus a small train holdout stratified by (source, task), which also covers ERA.
+
+1,456 of the 2,000 val questions are exact copies of train questions: same video, question, option
+set and answer (measured 8 Oct 2026). Test has 2. A fine-tune that saw a copy is being asked to
+recall it, not to answer it, so dev leaves out every question whose copy is in fit (and any repeat
+within dev). That leaves about 1,800 questions that measure what test measures.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from collections import defaultdict
 from pathlib import Path
 
 SPLITS = ("train", "val", "test")
+DEV_SET = "unseen-v1"  # recorded with each run; runs scored on an older dev set are rescored (reva.autopilot)
 LETTERS = ("A", "B", "C", "D")
 
 
@@ -80,6 +86,23 @@ def stratified_holdout(rows: list[dict], frac: float, seed: int) -> tuple[list[d
     return [r for r in rows if r["qa_id"] not in held], [r for r in rows if r["qa_id"] in held]
 
 
+def qa_key(r: dict) -> tuple:
+    """A question's identity regardless of letter order: video, question, option set, answer text."""
+    opts = r["options"]
+    return r["video_path"], r["question"].strip(), tuple(sorted(opts.values())), opts.get(r.get("correct_answer"))
+
+
+def unseen(dev: list[dict], fit: list[dict]) -> list[dict]:
+    """dev without the questions fit already holds, and without repeats."""
+    seen = {qa_key(r) for r in fit}
+    out = []
+    for r in dev:
+        if (k := qa_key(r)) not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
 def make_splits(root: str | Path, holdout_frac: float, seed: int, refit: bool = False,
                 refit_with_val: bool = False) -> dict[str, list[dict]]:
     """{"fit", "dev", "test"} for one experiment.
@@ -89,7 +112,7 @@ def make_splits(root: str | Path, holdout_frac: float, seed: int, refit: bool = 
     """
     train, val, test = (load_split(root, s) for s in SPLITS)
     fit, holdout = stratified_holdout(train, holdout_frac, seed)
-    dev = val + holdout
+    dev = unseen(val + holdout, fit)
     if refit:
         fit = train + (val if refit_with_val else [])
     return {"fit": fit, "dev": dev, "test": test}
