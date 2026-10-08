@@ -14,10 +14,10 @@ Default backbone: Qwen3-VL (transformers native). It takes frames plus their rea
 
 from __future__ import annotations
 
+import copy
 import math
 import random
 import time
-import copy
 from pathlib import Path
 
 import numpy as np
@@ -147,6 +147,47 @@ class VLM:
         h = base.model(input_ids=ids, past_key_values=copy.deepcopy(cache), use_cache=True).last_hidden_state
         return base.lm_head(h[:, -1])[0, self.letter_ids].float()
 
+    # Training packs several questions about one video into one sequence: [video][q1][q2]...[qk].
+    # Each question attends to the video and to itself only, at the positions it would have alone,
+    # so the k losses and their gradients equal k separate passes, but the video is encoded once.
+    def can_pack(self) -> bool:
+        """Block masks need attention in every layer; linear-attention layers (Qwen3.5) carry a
+        recurrent state from one question into the next."""
+        cfg = self._base().config
+        types = getattr(getattr(cfg, "text_config", cfg), "layer_types", None) or []
+        return all(t == "full_attention" for t in types)
+
+    def packed_logits(self, rows: list[dict], video: dict, orders: list[list[str]]) -> torch.Tensor:
+        """(k, 4) letter logits for k questions about one video, from one forward pass."""
+        batch = self.inputs(rows[0], video, orders[0])
+        ids = batch["input_ids"]
+        tails = [self.tail_ids(r, video, o).to(self.device) for r, o in zip(rows, orders)]
+        n = ids.shape[1] - tails[0].shape[1]
+        if n <= 0 or not torch.equal(ids[:, n:], tails[0]):
+            raise ValueError(f"prompt does not split cleanly after the video for {rows[0]['qa_id']}")
+        base = self._base()
+        pos, _ = base.model.get_rope_index(ids, video_grid_thw=batch.get("video_grid_thw"),
+                                           attention_mask=batch["attention_mask"],
+                                           mm_token_type_ids=batch["mm_token_type_ids"])
+        start = pos[:, :, n:n + 1]  # text after the video moves on all three rope axes together
+        lens = [t.shape[1] for t in tails]
+        seq = torch.cat([ids[:, :n], *tails], dim=1)
+        positions = torch.cat([pos[:, :, :n], *(start + torch.arange(m, device=pos.device) for m in lens)], dim=2)
+        seg = torch.cat([torch.zeros(n, dtype=torch.long)] + [torch.full((m,), j + 1) for j, m in enumerate(lens)])
+        seg = seg.to(self.device)
+        size = seq.shape[1]
+        causal = torch.ones(size, size, dtype=torch.bool, device=self.device).tril()
+        mask = causal & ((seg[None, :] == 0) | (seg[:, None] == seg[None, :]))
+        if base.config._attn_implementation == "eager":  # eager adds the mask to the scores
+            mask = torch.zeros(mask.shape, dtype=self.model.dtype, device=self.device).masked_fill(
+                ~mask, torch.finfo(self.model.dtype).min)
+        kw = {k: v for k, v in batch.items() if k not in ("input_ids", "attention_mask", "mm_token_type_ids")}
+        mm = torch.cat([batch["mm_token_type_ids"][:, :n], torch.zeros_like(seq[:, n:])], dim=1)
+        h = base.model(input_ids=seq, attention_mask=mask[None, None], position_ids=positions, mm_token_type_ids=mm,
+                       use_cache=False, **kw).last_hidden_state
+        ends = torch.tensor(lens, device=self.device).cumsum(0) + n - 1
+        return base.lm_head(h[0, ends])[:, self.letter_ids].float()
+
     @torch.no_grad()
     def predict(self, rows: list[dict], video_of, perms: int = 1, log_every: int = 200) -> dict[str, list[float]]:
         """{qa_id: [pA, pB, pC, pD]} in original option order, averaged over `perms` shifts."""
@@ -196,11 +237,32 @@ class VLM:
         self.model.print_trainable_parameters()
 
 
+def groups_by_video(rows: list[dict], pack: int, epochs: float, limit: int, rng: random.Random) -> list[list[dict]]:
+    """Training order: groups of up to `pack` questions about the same video, in random order, over
+    `epochs` passes of min(limit, len(rows)) questions. Every pass reshuffles which questions share a
+    group, so a question meets different neighbours."""
+    want = int(min(limit, len(rows)) * epochs)
+    out, n = [], 0
+    while n < want:
+        by_video: dict[str, list[dict]] = {}
+        for r in rng.sample(rows, len(rows)):
+            by_video.setdefault(r["video_path"], []).append(r)
+        chunk = [g[i:i + pack] for g in by_video.values() for i in range(0, len(g), pack)]
+        for g in rng.sample(chunk, len(chunk)):
+            if n >= want:
+                break
+            out.append(g[:want - n])
+            n += len(out[-1])
+    return out
+
+
 def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path, deadline: float | None,
           seed: int = 0) -> dict:
     """LoRA fine-tune on letter cross-entropy. Stops at the end of the epochs or at `deadline`
     (time.time()), whichever is first, and saves the adapter to out_dir/adapter.
 
+    Questions about the same video train together, `train.pack` at a time (VLM.packed_logits), so
+    the video is encoded once per group. Models with linear-attention layers train one at a time.
     fp16 (T4, V100) uses a GradScaler; steps with a non-finite loss are skipped and counted.
     """
     model = vlm.model
@@ -208,53 +270,64 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=tcfg.get("lr", 2e-4), weight_decay=tcfg.get("weight_decay", 0.0))
     accum = tcfg.get("grad_accum", 8)
-    limit = tcfg.get("max_samples") or len(rows)
-    plan = {"total": math.ceil(min(limit, len(rows)) * tcfg.get("epochs", 1) / accum)}
+    pack = tcfg.get("pack", 4) if vlm.can_pack() else 1
+    rng = random.Random(seed)
+    order = groups_by_video(rows, pack, tcfg.get("epochs", 1), tcfg.get("max_samples") or len(rows), rng)
+    plan = {"total": math.ceil(sum(map(len, order)) / accum)}
     plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
     # the cosine reads plan["total"] at every step, so resizing below reshapes the schedule
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / plan["warm"]) * 0.5 * (
         1 + math.cos(math.pi * min(1.0, s / max(1, plan["total"])))))
     fp16 = vlm.cfg.get("dtype", "fp16") == "fp16" and vlm.device.startswith("cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=fp16)
-    rng = random.Random(seed)
-    order = [r for _ in range(math.ceil(tcfg.get("epochs", 1))) for r in rng.sample(rows, len(rows))]
-    order = order[: int(min(limit, len(rows)) * tcfg.get("epochs", 1))]
     model.train()
-    stats = {"steps": 0, "samples": 0, "skipped": 0, "loss": None, "stopped": "done"}
-    run_loss, t0 = 0.0, time.time()
-    calib = tcfg.get("calib_samples", 2 * accum)
+    stats = {"steps": 0, "samples": 0, "skipped": 0, "loss": None, "stopped": "done", "pack": pack}
+    run_loss, run_n, since, seen, t0 = 0.0, 0, 0, 0, time.time()
+    calib, sized = tcfg.get("calib_samples", 2 * accum), False
     i = 0
     while i < len(order):
-        row = order[i]
-        i += 1
-        if i == calib + 1 and deadline < float("inf"):
+        if not sized and seen >= calib and deadline < float("inf"):
             # self-sizing: after `calib` samples, keep only as many as fit before the deadline
-            rate = (time.time() - t0) / calib
-            fit = calib + int(0.95 * (deadline - time.time()) / rate)
-            if fit < len(order):
-                order = order[:max(calib + accum, fit)]
-                plan["total"] = math.ceil(len(order) / accum)
+            sized, rate = True, (time.time() - t0) / seen
+            fit, kept = int(0.95 * (deadline - time.time()) / rate), i
+            while kept < len(order) and fit >= len(order[kept]):
+                fit -= len(order[kept])
+                kept += 1
+            if kept < len(order):
+                order = order[:max(kept, i + 1)]
+                plan["total"] = math.ceil((seen + sum(map(len, order[i:]))) / accum)
                 plan["warm"] = max(1, int(plan["total"] * tcfg.get("warmup", 0.03)))
-            stats["planned_samples"] = len(order)
-            print(f"train sized to {len(order)} samples at {rate:.2f} s/sample", flush=True)
+            stats["planned_samples"] = seen + sum(map(len, order[i:]))
+            print(f"train sized to {stats['planned_samples']} samples at {rate:.2f} s/sample", flush=True)
         if time.time() > deadline:
             stats["stopped"] = "deadline"
             break
-        shown = rng.sample(LETTERS, 4) if tcfg.get("shuffle_options", True) else list(LETTERS)
-        label = torch.tensor([shown.index(row["correct_answer"])], device=vlm.device)
+        group = order[i]
+        i += 1
+        seen += len(group)
+        shown = [rng.sample(LETTERS, 4) if tcfg.get("shuffle_options", True) else list(LETTERS) for _ in group]
+        label = torch.tensor([s.index(r["correct_answer"]) for r, s in zip(group, shown)], device=vlm.device)
+        video = video_of(group[0])
         with torch.autocast("cuda", dtype=torch.float16, enabled=fp16):
-            logits = vlm.letter_logits(vlm.inputs(row, video_of(row), shown))
-        loss = torch.nn.functional.cross_entropy(logits[None], label) / accum
+            if len(group) > 1:
+                logits = vlm.packed_logits(group, video, shown)
+            else:
+                logits = vlm.letter_logits(vlm.inputs(group[0], video, shown[0]))[None]
+        loss = torch.nn.functional.cross_entropy(logits, label, reduction="sum") / accum
         if not torch.isfinite(loss):
             stats["skipped"] += 1
             opt.zero_grad(set_to_none=True)
+            since = 0
             if stats["skipped"] > tcfg.get("max_skipped", 50):
                 raise RuntimeError("too many non-finite losses; try dtype fp32 compute or a lower lr")
             continue
         scaler.scale(loss).backward()
         run_loss += loss.item() * accum
-        stats["samples"] += 1
-        if i % accum == 0:
+        run_n += len(group)
+        stats["samples"] += len(group)
+        since += len(group)
+        if since >= accum:
+            since = 0
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(params, tcfg.get("clip", 1.0))
             scaler.step(opt)
@@ -263,10 +336,10 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
             sched.step()
             stats["steps"] += 1
             if stats["steps"] % tcfg.get("log_every", 25) == 0:
-                stats["loss"] = run_loss / (accum * tcfg.get("log_every", 25))
+                stats["loss"] = run_loss / run_n
                 print(f"train step {stats['steps']}/{plan['total']} loss {stats['loss']:.4f} "
-                      f"{(time.time() - t0) / i:.2f} s/sample", flush=True)
-                run_loss = 0.0
+                      f"{(time.time() - t0) / seen:.2f} s/sample", flush=True)
+                run_loss, run_n = 0.0, 0
             if stats["steps"] % tcfg.get("save_every", 200) == 0:
                 model.save_pretrained(Path(out_dir) / "adapter")
     model.save_pretrained(Path(out_dir) / "adapter")

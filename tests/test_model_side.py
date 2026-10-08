@@ -68,6 +68,64 @@ def test_shared_video_prefix_matches_full_forward():
             assert np.allclose(shared[q], whole[q], atol=1e-5), (model_id, stamps, lora, q, shared[q], whole[q])
 
 
+def test_groups_cover_every_question_once_and_never_mix_videos():
+    pytest.importorskip("torch")
+    import random
+
+    from reva.model import groups_by_video
+
+    rows = [{"qa_id": f"q{i}", "video_path": f"v{i % 3}"} for i in range(20)]
+    groups = groups_by_video(rows, pack=4, epochs=1, limit=len(rows), rng=random.Random(0))
+    assert sorted(r["qa_id"] for g in groups for r in g) == sorted(r["qa_id"] for r in rows)
+    assert all(1 <= len(g) <= 4 and len({r["video_path"] for r in g}) == 1 for g in groups)
+    two = groups_by_video(rows, pack=4, epochs=1.5, limit=len(rows), rng=random.Random(0))
+    assert sum(map(len, two)) == 30  # a fractional epoch stops at the sample count
+
+
+def test_packed_training_gradients_equal_separate_passes():
+    """Several questions about one video in one sequence give the same LoRA gradients as one pass
+    per question (regression guard for packed training)."""
+    torch = pytest.importorskip("torch")
+    import numpy as np
+
+    from reva.model import VLM, shift
+    from reva.smoke import TINY
+
+    rng = np.random.default_rng(0)
+    video = {"frames": rng.integers(0, 255, (4, 64, 96, 3), dtype=np.uint8), "indices": np.array([1, 7, 13, 19]),
+             "fps": 8.0, "total": 24}
+    rows = [{"qa_id": f"q{i}", "video_path": "a.mp4", "question": "Where is it" + "?" * (i + 1),
+             "options": {L: f"{L} {i}" for L in "ABCD"}, "correct_answer": "ABCD"[i]} for i in range(3)]
+    orders = [shift(i) for i in range(3)]
+    labels = torch.tensor([o.index(r["correct_answer"]) for r, o in zip(rows, orders)])
+    vlm = VLM({"id": TINY, "dtype": "fp32", "timestamps_in_text": True}, device="cpu")
+    vlm.add_lora({"grad_ckpt": False, "lora_dropout": 0.0})
+    torch.manual_seed(0)
+    for name, w in vlm.model.named_parameters():
+        if "lora_B" in name:
+            w.data.normal_(0, 0.05)
+    params = [w for w in vlm.model.parameters() if w.requires_grad]
+
+    def grads(loss):
+        vlm.model.zero_grad()
+        loss.backward()
+        return [w.grad.clone() for w in params]
+
+    assert vlm.can_pack()
+    packed = grads(torch.nn.functional.cross_entropy(vlm.packed_logits(rows, video, orders), labels, reduction="sum"))
+    alone = grads(sum(torch.nn.functional.cross_entropy(vlm.letter_logits(vlm.inputs(r, video, o))[None], y[None])
+                      for r, o, y in zip(rows, orders, labels)))
+    assert all(torch.allclose(a, b, atol=1e-5) for a, b in zip(packed, alone))
+    assert any(a.abs().sum() > 0 for a in packed)
+
+
+def test_linear_attention_models_train_one_question_at_a_time():
+    pytest.importorskip("torch")
+    from reva.model import VLM
+
+    assert not VLM({"id": "trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration", "dtype": "fp32"}, device="cpu").can_pack()
+
+
 def test_chat_template_kwargs_close_the_think_block():
     """Qwen3.5 opens <think> by default, so the next token would not be the answer letter."""
     pytest.importorskip("torch")
