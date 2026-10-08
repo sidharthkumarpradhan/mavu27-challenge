@@ -1,4 +1,4 @@
-# Handoff (6 Oct 2026)
+# Handoff (8 Oct 2026)
 
 Read this first, then `CLAUDE.md`, then the relevant part of `docs/research.md`.
 
@@ -46,6 +46,23 @@ These are the first things the first job will tell us. Check its log before trus
 - Model arena (`reva.arena`): once two or more fair runs exist, the loop averages the top k on
   dev and adds the winner as an `ens-` run. It goes through the same gate and preflight.
   `arena.json` on the state branch records which runs were last compared.
+
+## Added 8 Oct 2026
+
+- Board: leader mkhlystun 0.8795, ours 0.7177 (zs-4b, 5th). Biggest gaps: Temporal Grounding and
+  Perspective and Viewpoint. Most Temporal Grounding questions ask for a time in seconds at 0.5 s
+  steps on videos of mostly 2 to 8 s, so frame density matters.
+- Job 1 spent 7 of 10.5 GPU hours on inference (3.0 s per dev question, 3.9 s per test question).
+  Two speedups are merged and not yet measured on a T4:
+  - Inference encodes each video once and reuses its KV cache for every question and option
+    shift (#21). Option-shift TTA (`infer.perms`) is now nearly free.
+  - Training packs up to `train.pack` (4) questions about one video into one sequence with a
+    block mask (#23). Qwen3.5 has linear-attention layers and trains one question at a time.
+- Qwen3.5-4B joined the arena (#22). Job 3: ft-4b-32f and ft-q35-4b-16f. Job 4: ft-8b-4bit-16f.
+- A second Kaggle account takes jobs when the first is out of weekly quota (see CLAUDE.md).
+- Run ids hash the whole config. Never add a default to competition.yaml while a job runs; read new
+  keys with a fallback in code. A test pins job 2's ids.
+- The owner has an OpenReview account (8 Oct 2026). Workshop paper due Oct 20.
 
 ## Next steps, in order
 

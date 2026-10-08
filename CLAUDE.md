@@ -52,8 +52,10 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
   unless the owner has switched on the automated path for them. Submissions are on that path.
 - Merging is on that path too (owner, 7 Oct 2026: "you have the complete control, as long as
   everything adheres to guidelines, please merge it, don't wait for me"). The agent merges its
-  own PRs once CI is green on the latest commit, every review finding is handled, and the change
-  follows the compliance rules below. Anything that touches compliance is the owner's call.
+  own PRs once CI is green on the latest commit and the change follows the compliance rules
+  below. Bot reviews (CodeRabbit) never block a merge (owner, 8 Oct 2026: "don't wait for
+  coderabbit... the priorities should always be beat leaderboard"). A finding that arrives later
+  is still handled in a follow-up PR. Anything that touches compliance is the owner's call.
 - Compliance before score. Evidence over intuition. Every number has a source and a date.
 - Measure before building. Find the largest (test weight x gap to leader) and work only that.
 - Ceilings before architecture. Run an oracle or probe before a big build.
