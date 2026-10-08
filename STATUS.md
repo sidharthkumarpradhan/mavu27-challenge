@@ -1,8 +1,7 @@
-# ReVA autopilot status (2026-10-08T22:13:40Z)
+# ReVA autopilot status (2026-10-08T22:20:47Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- arena: no average of the top runs beats ft-8b-4bit-16f-62f77933 on dev
 
 ## Leaderboard (top 8)
 
