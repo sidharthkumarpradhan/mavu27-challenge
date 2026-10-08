@@ -196,3 +196,17 @@ def test_a_prompt_that_does_not_split_falls_back_instead_of_failing(tmp_path, mo
     vlm.add_lora({"grad_ckpt": False})
     stats = train(vlm, rows, video_of, {"grad_accum": 4, "pack": 4}, tmp_path, deadline=None)
     assert stats["samples"] == len(rows) and torch.isfinite(torch.tensor(stats["loss"]))
+
+
+def test_lora_keeps_the_frozen_weights_in_half_precision():
+    """The 4-bit 8B shares a 16 GB T4 with its activations: adding LoRA must not upcast the frozen
+    vision tower or lm_head to fp32 (peft's prepare_model_for_kbit_training does)."""
+    torch = pytest.importorskip("torch")
+    from reva.model import VLM
+
+    vlm = VLM({"id": "trl-internal-testing/tiny-Qwen3VLForConditionalGeneration", "dtype": "fp16"}, device="cpu")
+    vlm.cfg["load_4bit"] = True  # the branch the 8B QLoRA takes; bitsandbytes itself needs a GPU
+    vlm.add_lora({})
+    frozen = {w.dtype for w in vlm.model.parameters() if not w.requires_grad}
+    assert frozen == {torch.float16}
+    assert any(w.requires_grad for w in vlm.model.parameters())
