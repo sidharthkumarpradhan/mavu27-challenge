@@ -13,6 +13,15 @@ State lives in a directory that the workflow keeps on the `state` branch:
 - board.csv          every leaderboard row ever seen
 - STATUS.md          the human summary
 The repo is public. Nothing here holds test predictions or probabilities.
+
+Every lane's output is archived in a private Kaggle dataset under the account that ran it, named
+reva-run-<run id>, one dataset version per session: config, logs (the lane's and the kernel's),
+the training checkpoint, the finished adapter, dev predictions and train stats. Test predictions
+stay out of it; they live only in the kernel's own output (CLAUDE.md compliance rules).
+An unfinished run loses nothing: its next lane mounts that dataset and carries on
+(reva.remote.restore). When the next lane runs on the other account, the dataset is copied there
+first, since a private dataset mounts only in its owner's kernels. The Kaggle keys stay in the
+workflow; no secret enters a kernel.
 """
 
 from __future__ import annotations
@@ -20,6 +29,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+import shutil
+import tarfile
 import traceback
 from pathlib import Path
 
@@ -82,16 +93,72 @@ def env_failure(run: dict) -> bool:
     return run.get("status") != "ok" and any(s in run.get("error", "") for s in ENV_ERRORS)
 
 
+FREE_SESSIONS = 4  # a run that spans sessions (train.span_sessions) stops on its own; this caps a runaway
+
+
 def failures(runs: list[dict]) -> dict[str, int]:
     """Failures that count against each run's retries. Environment failures are the account's or
-    the image's fault, so the first ENV_FREE_TRIES of them are free."""
+    the image's fault, so the first ENV_FREE_TRIES of them are free. A session that a spanning run
+    ended on purpose ("partial") is not a failure until there are more than FREE_SESSIONS of them."""
     own: dict[str, int] = {}
     env: dict[str, int] = {}
+    part: dict[str, int] = {}
     for r in runs:
         if r["status"] != "ok":
-            bucket = env if env_failure(r) else own
+            bucket = part if r["status"] == "partial" else env if env_failure(r) else own
             bucket[r["run_id"]] = bucket.get(r["run_id"], 0) + 1
-    return {k: own.get(k, 0) + max(0, env.get(k, 0) - ENV_FREE_TRIES) for k in own.keys() | env.keys()}
+    return {k: own.get(k, 0) + max(0, env.get(k, 0) - ENV_FREE_TRIES) + max(0, part.get(k, 0) - FREE_SESSIONS)
+            for k in own.keys() | env.keys() | part.keys()}
+
+
+# what reva.job leaves behind that a later session can carry on from
+RESUMABLE = ("ckpt", "ckpt.old", "train.json", "dev_probs.part.json", "test_probs.part.json")
+
+
+def stash_ref(user: str, run_id: str) -> str:
+    """The private dataset that archives a run's output on `user`'s account."""
+    return f"{user.lower()}/" + f"reva-run-{run_id}"[:50].rstrip("-").lower()
+
+
+def test_predictions(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    """tarfile filter: drop test probabilities and submission zips (they stay in kernel output only)."""
+    name = Path(info.name).name
+    return None if name.startswith("test_probs") or name.endswith(".zip") else info
+
+
+def stash(kaggle, run_dir: Path, ref: str, work: Path, kernel_log: Path | None = None, message: str = "") -> None:
+    """Upload a run's output folder, as one tar that Kaggle unpacks, as a new version of the private
+    dataset `ref`. Earlier versions stay: each holds one session's state and logs."""
+    folder = work / "stash" / ref.replace("/", "--")
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    if kernel_log and kernel_log.exists():
+        shutil.copy(kernel_log, run_dir / "kernel.log")
+    with tarfile.open(folder / f"{run_dir.name}.tar", "w") as t:
+        t.add(run_dir, arcname=run_dir.name, filter=test_predictions)
+    kaggle.dataset_upload(folder, ref, message or f"{run_dir.name} state")
+
+
+def staged(kaggle, runs: list[dict], lanes: list[dict], user: str, work: Path, notes: list[str]) -> dict[str, str]:
+    """{run_id: dataset} for every lane with saved state, the newest kept. State saved by another
+    account is copied into `user`'s first. A copy that fails costs the progress, not the job."""
+    out = {}
+    for lane in lanes:
+        saved = [r["stash"] for r in runs if r["run_id"] == lane["run_id"] and r.get("stash") and r.get("resumable")]
+        if not saved:
+            continue
+        src, ref = saved[-1], stash_ref(user, lane["run_id"])
+        try:
+            if src.split("/")[0].lower() != user.lower():
+                copy = work / "stash-copy" / lane["run_id"]
+                shutil.rmtree(copy, ignore_errors=True)
+                kaggle.dataset_download(src, copy)
+                stash(kaggle, copy / lane["run_id"], ref, work)
+                notes.append(f"copied {lane['run_id']}'s saved state from {src} to {ref}")
+            out[lane["run_id"]] = ref
+        except Exception as e:
+            notes.append(f"could not stage {lane['run_id']}'s saved state from {src}; it starts fresh: {public(e)}")
+    return out
 
 
 def offline_until(runs: list[dict], user: str, hours: float = 6) -> dt.datetime | None:
@@ -228,8 +295,14 @@ def collect(kaggle, active: dict, work: Path, now: dt.datetime) -> tuple[list[di
         else:
             lane_log = dest / run_id / "log.txt"
             text = lane_log.read_text(errors="replace") if lane_log.exists() else log
-            rows.append({"run_id": run_id, "status": "failed", "kernel": active["kernel"], "finished": iso(now),
-                         "sha": active["sha"], "error": tail(text, 30)})
+            partial = dest / run_id / "partial.json"
+            row = {"run_id": run_id, "status": "partial" if partial.exists() else "failed", "kernel": active["kernel"],
+                   "finished": iso(now), "sha": active["sha"], "error": tail(text, 30)}
+            if partial.exists():
+                row["where"] = json.loads(partial.read_text()).get("where", "")
+            if any((dest / run_id / n).exists() for n in RESUMABLE):
+                row["resumable"] = True
+            rows.append(row)
     hours = (now - parse_iso(active["pushed"])).total_seconds() / 3600
     job = {"kernel": active["kernel"], "pushed": active["pushed"], "collected": iso(now), "hours": round(hours, 2),
            "runs": active["runs"], "sha": active["sha"]}
@@ -321,13 +394,23 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
         if kstate in K_DONE | K_FAILED:
             fresh, job, log = collect(kaggle, active, work, now)
             job["state"] = kstate
+            kdest = work / active["kernel"].split("/")[-1]
             for r in fresh:
+                if (kdest / r["run_id"]).is_dir():  # archive it; an unfinished run's next lane resumes from it
+                    ref = stash_ref(active["kernel"].split("/")[0], r["run_id"])
+                    try:
+                        stash(kaggle, kdest / r["run_id"], ref, work, kdest / f"{kdest.name}.log",
+                              f"{active['kernel']} {r['status']}")
+                        r["stash"] = ref
+                        notes.append(f"saved {r['run_id']} ({r['status']}) to private dataset {ref}")
+                    except Exception as e:  # the kernel output still holds it; record the run regardless
+                        notes.append(f"could not save {r['run_id']}'s state: {public(e)}")
                 registry.append(state / "runs.jsonl", r)
             registry.append(state / "jobs.jsonl", job)
             active_path.unlink()
             active = None
             out["collected"] = [r["run_id"] for r in fresh]
-            bad = [r["run_id"] for r in fresh if r["status"] != "ok"]
+            bad = [r["run_id"] for r in fresh if r["status"] not in ("ok", "partial")]
             if bad or kstate in K_FAILED:
                 out["needs_fix"] = True
                 out["log_tail"] = log
@@ -418,7 +501,9 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 notes.append(f"GPU quota pacing on Kaggle account {n}: {used:.1f} h used in 7 days")
                 continue
             kdir = work / "kernel"
-            slug = remote.build(cfg, lanes, sha, kdir, user, hours=hours, stamp=now.strftime("%m%d%H%M"))
+            resume = staged(kaggle, runs, lanes, user, work, notes)
+            slug = remote.build(cfg, lanes, sha, kdir, user, hours=hours, stamp=now.strftime("%m%d%H%M"),
+                                resume=resume)
             try:
                 pushed = kaggle.push(kdir, timeout_s=int(3600 * hours),
                                      accelerator=C.get(cfg, "remote.accelerator"))
@@ -433,11 +518,14 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 continue
             active = {"kernel": slug, "pushed": iso(now), "sha": sha, "runs": [c["run_id"] for c in lanes],
                       "url": pushed.url, "hours": round(hours, 2)}
+            if resume:
+                active["resume"] = resume
             active_path.write_text(json.dumps(active, indent=1))
             out["pushed"] = active
             out.pop("push_refused", None)
             out.pop("resting", None)
             notes.append(f"pushed {slug} with {active['runs']}"
+                         + (f", resuming {sorted(resume)}" if resume else "")
                          + (f", sized to the {hours:.1f} h account {n} has left this week"
                             if hours < C.get(cfg, "remote.max_hours") else ""))
             break

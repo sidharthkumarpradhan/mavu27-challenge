@@ -324,3 +324,11 @@ def test_inference_carries_on_where_an_earlier_session_stopped(tmp_path):
     assert list(probs) == [r["qa_id"] for r in rows] and not set(again.seen) & set(first)
     with pytest.raises(job.SessionOver):  # a spanning run past its session's end stops before scoring
         job.predict_saved(Fake(), rows, None, 1, tmp_path / "other.part.json", stop_at=0.0, chunk=2)
+
+
+def test_a_job_never_resumes_another_runs_state(tmp_path):
+    from reva import job
+
+    (tmp_path / "config.json").write_text(json.dumps({"run_id": "other-run"}))
+    with pytest.raises(RuntimeError, match="other-run"):
+        job.run({"run_id": "this-run"}, tmp_path, "cpu")

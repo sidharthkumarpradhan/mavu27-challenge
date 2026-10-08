@@ -172,6 +172,40 @@ class Kaggle:
     def logs(self, slug: str) -> str:
         return log_text(self._run("kernels", "logs", slug, check=False))
 
+    # datasets: private stores for unfinished runs' checkpoints (reva.autopilot.stash). Checked
+    # against kaggle 2.2.4 on 8 Oct 2026: a missing dataset's status prints a 403 and exits 0, an
+    # uploaded .tar arrives unpacked, and a kernel mounts the dataset at
+    # /kaggle/input/datasets/<owner>/<name>/.
+    def dataset_status(self, ref: str) -> str | None:
+        """'ready' and so on, or None when the dataset does not exist (or is not ours)."""
+        out = self._run("datasets", "status", ref, "--format", "json", check=False)
+        try:
+            return json.loads(out.strip().splitlines()[-1])["status"]
+        except (ValueError, KeyError, IndexError, TypeError):
+            return None
+
+    def dataset_upload(self, folder: Path, ref: str, message: str, timeout_s: float = 900, poll_s: float = 15) -> None:
+        """Make `folder` the private dataset `ref`: create it, or add a version (the earlier ones
+        stay). Returns once Kaggle has processed it."""
+        meta = {"title": ref.split("/", 1)[1], "id": ref, "licenses": [{"name": "CC0-1.0"}]}
+        (Path(folder) / "dataset-metadata.json").write_text(json.dumps(meta))
+        if self.dataset_status(ref) is None:
+            out = self._run("datasets", "create", "-p", str(folder), "-q")
+        else:
+            out = self._run("datasets", "version", "-p", str(folder), "-m", message, "-q")
+        if "error" in out.lower():
+            raise KaggleError(f"dataset upload to {ref} failed: {out.strip()[-500:]}")
+        end = self.clock() + timeout_s
+        while (state := self.dataset_status(ref)) != "ready":
+            if self.clock() >= end:
+                raise KaggleTimeout(f"dataset {ref} still '{state}' after {timeout_s / 60:.0f} min")
+            self.sleep(poll_s)
+
+    def dataset_download(self, ref: str, dest: Path) -> Path:
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        self._run("datasets", "download", ref, "-p", str(dest), "--unzip", "-q")
+        return Path(dest)
+
 
 def owner(slug: str) -> str:
     return slug.split("/", 1)[0].lower()
@@ -207,6 +241,15 @@ class Accounts:
 
     def logs(self, slug: str) -> str:
         return self._for(slug).logs(slug)
+
+    def dataset_status(self, ref: str) -> str | None:
+        return self._for(ref).dataset_status(ref)
+
+    def dataset_upload(self, folder: Path, ref: str, message: str, **kwargs) -> None:
+        self._for(ref).dataset_upload(folder, ref, message, **kwargs)
+
+    def dataset_download(self, ref: str, dest: Path) -> Path:
+        return self._for(ref).dataset_download(ref, dest)
 
 
 def from_env(home_root: str | Path | None = None, environ: dict[str, str] | None = None) -> Accounts | Kaggle:
