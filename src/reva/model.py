@@ -344,6 +344,7 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
         if state.get("cuda_rng") and torch.cuda.is_available():
             torch.cuda.set_rng_state_all(state["cuda_rng"])
         i, stats = state["i"], {**state["stats"], "stopped": "done"}
+        stats["pack"] = min(pack, stats.get("pack", pack))  # a pack size that ran out of memory stays small
         stats["sessions"] = stats.get("sessions", 1) + 1
         plan["total"] = stats["steps"] + count_steps(map(len, order[i:]), accum)
         plan["warm"] = state["plan"]["warm"]
@@ -374,6 +375,28 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
         opt.zero_grad(set_to_none=True)
         sched.step()
         stats["steps"] += 1
+
+    def learn(group: list[dict], shown: list[list[str]], video, size: int) -> float:
+        """Forward and backward for one group, `size` questions per pass. Returns the summed loss
+        (already divided by accum), or nan when it is not finite; the caller then drops the window."""
+        label = torch.tensor([s.index(r["correct_answer"]) for r, s in zip(group, shown)], device=vlm.device)
+        parts = []
+        for k in range(0, len(group), size):
+            rows, order_k = group[k:k + size], shown[k:k + size]
+            with torch.autocast("cuda", dtype=torch.float16, enabled=fp16):
+                try:
+                    logits = vlm.packed_logits(rows, video, order_k) if len(rows) > 1 else None
+                except ValueError as e:  # train this group one question at a time rather than lose the job
+                    print(f"WARNING {e}; training the group unpacked", flush=True)
+                    logits = None
+                if logits is None:
+                    logits = torch.stack([vlm.letter_logits(vlm.inputs(r, video, o)) for r, o in zip(rows, order_k)])
+            part = torch.nn.functional.cross_entropy(logits, label[k:k + size], reduction="sum") / accum
+            if not torch.isfinite(part):
+                return float("nan")
+            scaler.scale(part).backward()
+            parts.append(part.item())
+        return sum(parts)
 
     spanning = False
     while i < len(order):
@@ -407,26 +430,32 @@ def train(vlm: VLM, rows: list[dict], video_of, tcfg: dict, out_dir: str | Path,
         i += 1
         seen += len(group)
         shown = [rng.sample(LETTERS, 4) if tcfg.get("shuffle_options", True) else list(LETTERS) for _ in group]
-        label = torch.tensor([s.index(r["correct_answer"]) for r, s in zip(group, shown)], device=vlm.device)
         video = video_of(group[0])
-        with torch.autocast("cuda", dtype=torch.float16, enabled=fp16):
-            try:
-                logits = vlm.packed_logits(group, video, shown) if len(group) > 1 else None
-            except ValueError as e:  # train this group one question at a time rather than lose the job
-                print(f"WARNING {e}; training the group unpacked", flush=True)
-                logits = None
-            if logits is None:
-                logits = torch.stack([vlm.letter_logits(vlm.inputs(r, video, o)) for r, o in zip(group, shown)])
-        loss = torch.nn.functional.cross_entropy(logits, label, reduction="sum") / accum
-        if not torch.isfinite(loss):
+        try:
+            loss = learn(group, shown, video, stats["pack"])
+        except torch.OutOfMemoryError:
+            loss = None  # handled below, outside the except, so the traceback lets go of the activations
+        if loss is None:
+            # out of memory: drop this window's gradients and train in smaller packs from here on
+            opt.zero_grad(set_to_none=True)
+            stats["dropped"] = stats.get("dropped", 0) + since
+            since, run_loss, run_n = 0, 0.0, 0
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if stats["pack"] == 1:
+                raise RuntimeError("out of GPU memory on a single question; use fewer frames or a 4-bit model")
+            stats["pack"] //= 2
+            print(f"WARNING out of GPU memory; training {stats['pack']} question(s) per pass from here on", flush=True)
+            i, seen = i - 1, seen - len(group)  # the same group again, smaller
+            continue
+        if not math.isfinite(loss):
             stats["skipped"] += 1
             opt.zero_grad(set_to_none=True)
             since = 0
             if stats["skipped"] > tcfg.get("max_skipped", 50):
                 raise RuntimeError("too many non-finite losses; try dtype fp32 compute or a lower lr")
             continue
-        scaler.scale(loss).backward()
-        run_loss += loss.item() * accum
+        run_loss += loss * accum
         run_n += len(group)
         stats["samples"] += len(group)
         since += len(group)
