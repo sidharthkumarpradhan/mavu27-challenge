@@ -85,6 +85,17 @@ def test_kernel_script_compiles_and_pins(tmp_path):
     assert slug.startswith("someone/reva-zs-4b-")
 
 
+def test_each_push_gets_its_own_kernel(tmp_path):
+    """Regression (8 Oct 2026): a retry reused the first lane's slug, and the new version replaced
+    the old one's output, so a finished run's probabilities and adapter were lost."""
+    lanes = [{**remote.pending(cfg(), QUEUE, set(), {})[0], "run_id": "ft-8b-4bit-16f-62f77933" + "x" * 30}]
+    a = remote.build(cfg(), lanes, "abc", tmp_path / "a", "someone", stamp="10082146")
+    b = remote.build(cfg(), lanes, "abc", tmp_path / "b", "someone", stamp="10090311")
+    assert a != b and a.endswith("-10082146") and b.endswith("-10090311")
+    name = a.split("/", 1)[1]
+    assert len(name) <= 50 and json.loads((tmp_path / "a" / "kernel-metadata.json").read_text())["title"] == name
+
+
 def run_row(run_id, w, test_n=4000):
     return {"run_id": run_id, "status": "ok", "zip": f"{run_id}.zip", "n": {"test": test_n},
             "metrics": {"weighted_accuracy": w, "overall_accuracy": w}, "kernel": "u/k"}
