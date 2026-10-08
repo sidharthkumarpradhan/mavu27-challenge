@@ -1,14 +1,9 @@
-# ReVA autopilot status (2026-10-08T21:46:01Z)
+# ReVA autopilot status (2026-10-08T21:47:01Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- job tubu9938/reva-ft-q35-4b-16f-e4ba68c0 complete; failed lanes: ['ft-q35-4b-16f-e4ba68c0'] 
-- collected ['ft-q35-4b-16f-e4ba68c0', 'ft-8b-4bit-16f-62f77933']
+- leaderboard: 8 rows, 1 new; leader mkhlystun 0.8795
+- job tubu9938/reva-ft-4b-16f-830869b1 is running
 - arena skipped this cycle: FileNotFoundError
-- next candidate ft-8b-4bit-16f-62f77933: dev weighted 0.8175 +/- 0.0133, projected board 0.8182 (2 calibration pairs); leader 0.8795, below by 0.0613
-- submitted ft-8b-4bit-16f-62f77933 as 970254 (fill_test): dev 0.8175 vs best submitted 0.7442; status Finished
-- Kaggle weekly GPU quota reached on account 1
-- pushed tubu9938/reva-ft-4b-16f-830869b1 with ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0'], sized to the 6.8 h account 2 has left this week
 
 ## Leaderboard (top 8)
 
@@ -19,7 +14,7 @@
 | 3 | Vincente | 0.8355 |
 | 4 | am | 0.8340 |
 | 5 | amirmazaheri | 0.8313 |
-| 6 | StagAI | 0.7410 |
+| 6 | StagAI | 0.8125 |
 | 7 | Hoang Bui | 0.6793 |
 | 8 | chrisathy | 0.2515 |
 
