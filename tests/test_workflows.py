@@ -102,3 +102,18 @@ def test_loop_hands_over_when_main_moves_but_not_when_github_is_unreachable():
     run = cycles_step()["run"]
     assert "git ls-remote origin refs/heads/main" in run
     assert '[ -n "$main" ]' in run  # an empty answer is a network failure, not a new main
+
+
+def test_tests_that_need_torch_skip_without_it():
+    """Regression (8 Oct 2026): the autopilot runner installs no torch, and one test imported
+    reva.model unguarded. Its red suite blocked every GPU push. A test that imports a module
+    needing torch must call pytest.importorskip("torch") first."""
+    import ast
+
+    for path in (ROOT / "tests").glob("test_*.py"):
+        for fn in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_"):
+                continue
+            imports = any(isinstance(n, ast.ImportFrom) and n.module == "reva.model" for n in ast.walk(fn))
+            skips = any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "importorskip" for n in ast.walk(fn))
+            assert skips or not imports, f"{path.name}::{fn.name} imports reva.model without importorskip('torch')"

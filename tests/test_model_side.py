@@ -286,6 +286,7 @@ def test_a_spanning_run_trains_to_the_session_end_and_finishes_in_the_next(tmp_p
 
 
 def test_a_half_written_checkpoint_falls_back_to_the_last_whole_one(tmp_path):
+    pytest.importorskip("torch")
     from reva.model import find_checkpoint
 
     (tmp_path / "ckpt.old" / "adapter").mkdir(parents=True)
@@ -332,3 +333,30 @@ def test_a_job_never_resumes_another_runs_state(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"run_id": "other-run"}))
     with pytest.raises(RuntimeError, match="other-run"):
         job.run({"run_id": "this-run"}, tmp_path, "cpu")
+
+
+def test_running_out_of_gpu_memory_trains_in_smaller_packs(tmp_path, monkeypatch):
+    """Regression (8 Oct 2026): the fp16 4B ran out of memory on a T4 training 4 questions per
+    pass and lost the job. Training now halves the pack and goes on."""
+    torch = pytest.importorskip("torch")
+    from reva.model import VLM, train
+
+    rows, video_of = _tiny_training_set()
+    real = VLM.packed_logits
+
+    def small_gpu(self, group, video, orders):
+        if len(group) > 2:
+            raise torch.OutOfMemoryError("CUDA out of memory. Tried to allocate 1.38 GiB.")
+        return real(self, group, video, orders)
+
+    monkeypatch.setattr(VLM, "packed_logits", small_gpu)
+    vlm = _fresh_lora()
+    stats = train(vlm, rows, video_of, {"grad_accum": 8, "pack": 4}, tmp_path, deadline=None)
+    assert stats["pack"] == 2 and stats["stopped"] == "done" and stats["samples"] + stats["dropped"] >= len(rows)
+
+    def no_gpu(self, inputs):
+        raise torch.OutOfMemoryError("CUDA out of memory.")
+
+    monkeypatch.setattr(VLM, "letter_logits", no_gpu)
+    with pytest.raises(RuntimeError, match="single question"):
+        train(_fresh_lora(), rows, video_of, {"grad_accum": 8, "pack": 1}, tmp_path / "b", deadline=None)
