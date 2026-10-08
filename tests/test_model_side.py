@@ -1,5 +1,7 @@
 """Frame sampling and prompts without a GPU. The full job runs in `reva smoke` (CI)."""
 
+import json
+
 import pytest
 
 from reva import frames
@@ -210,3 +212,115 @@ def test_lora_keeps_the_frozen_weights_in_half_precision():
     frozen = {w.dtype for w in vlm.model.parameters() if not w.requires_grad}
     assert frozen == {torch.float16}
     assert any(w.requires_grad for w in vlm.model.parameters())
+
+
+def _lora_weights(vlm):
+    return {k: v.detach().clone() for k, v in vlm.model.named_parameters() if "lora_" in k}
+
+
+def _fresh_lora(init=None):
+    import torch
+
+    from reva.model import VLM
+
+    torch.manual_seed(0)
+    vlm = VLM({"id": "trl-internal-testing/tiny-Qwen3VLForConditionalGeneration", "dtype": "fp32"}, device="cpu")
+    vlm.add_lora({"grad_ckpt": False}, init)
+    return vlm
+
+
+def test_a_crashed_run_resumes_to_the_same_weights(tmp_path):
+    """A session that dies mid-training loses nothing: resuming from the last checkpoint gives the
+    same adapter as a run that never stopped (optimizer, scheduler and RNG states all restored)."""
+    torch = pytest.importorskip("torch")
+    from reva.model import find_checkpoint, train
+
+    rows, video_of = _tiny_training_set()
+    tcfg = {"grad_accum": 4, "pack": 2, "lr": 1e-3, "ckpt_minutes": 0}
+    whole = _fresh_lora()
+    full = train(whole, rows, video_of, tcfg, tmp_path / "a", deadline=None)
+
+    calls = []
+
+    def dies_on_the_fifth_video(r):
+        calls.append(r["qa_id"])
+        if len(calls) == 5:
+            raise RuntimeError("session killed")
+        return video_of(r)
+
+    with pytest.raises(RuntimeError):
+        train(_fresh_lora(), rows, dies_on_the_fifth_video, tcfg, tmp_path / "b", deadline=None)
+    ckpt = find_checkpoint(tmp_path / "b")
+    assert ckpt is not None
+    resumed = _fresh_lora(ckpt / "adapter")
+    stats = train(resumed, rows, video_of, tcfg, tmp_path / "b", deadline=None, resume=ckpt)
+    assert stats["steps"] == full["steps"] and stats["samples"] == full["samples"] and stats["sessions"] == 2
+    a, b = _lora_weights(whole), _lora_weights(resumed)
+    assert a.keys() == b.keys() and all(torch.allclose(a[k], b[k], atol=1e-6) for k in a)
+
+
+def test_a_spanning_run_trains_to_the_session_end_and_finishes_in_the_next(tmp_path, monkeypatch):
+    pytest.importorskip("torch")
+    from types import SimpleNamespace
+
+    from reva import model
+    from reva.model import find_checkpoint, train
+
+    rows, video_of = _tiny_training_set()
+    clock = [1000.0]  # every group takes 10 s of fake time
+    monkeypatch.setattr(model, "time", SimpleNamespace(time=lambda: clock[0]))
+
+    def slow(r):
+        clock[0] += 10
+        return video_of(r)
+
+    tcfg = {"grad_accum": 4, "pack": 2, "calib_samples": 4}
+    # the session has 35 s for training and no time for inference (the deadline has passed)
+    first = train(_fresh_lora(), rows, slow, tcfg, tmp_path, deadline=999.0, stop_at=1035.0)
+    assert first["stopped"] == "session" and 0 < first["samples"] < len(rows)
+    assert not (tmp_path / "adapter").exists()  # only a finished run writes the final adapter
+    ckpt = find_checkpoint(tmp_path)
+    second = train(_fresh_lora(ckpt / "adapter"), rows, video_of, tcfg, tmp_path, deadline=None, resume=ckpt)
+    assert second["stopped"] == "done" and second["samples"] == len(rows) and second["sessions"] == 2
+    assert (tmp_path / "adapter" / "adapter_config.json").exists()
+
+
+def test_a_half_written_checkpoint_falls_back_to_the_last_whole_one(tmp_path):
+    from reva.model import find_checkpoint
+
+    (tmp_path / "ckpt.old" / "adapter").mkdir(parents=True)
+    (tmp_path / "ckpt.old" / "state.pt").write_bytes(b"x")
+    (tmp_path / "ckpt.tmp").mkdir()  # the save that was cut off
+    assert find_checkpoint(tmp_path) == tmp_path / "ckpt.old"
+    assert find_checkpoint(tmp_path / "empty") is None
+
+
+def test_inference_carries_on_where_an_earlier_session_stopped(tmp_path):
+    from reva import job
+
+    rows = [{"qa_id": f"q{i}", "video_path": f"v{i % 3}"} for i in range(9)]
+
+    class Fake:
+        def __init__(self, die_after=None):
+            self.seen, self.die_after = [], die_after
+
+        def predict(self, part, video_of, perms, log_every=None):
+            if self.die_after is not None and len(self.seen) >= self.die_after:
+                raise RuntimeError("session killed")
+            self.seen += [r["qa_id"] for r in part]
+            return {r["qa_id"]: [0.1, 0.2, 0.3, 0.4] for r in part}
+
+    chunks = job.video_chunks(rows, 2)
+    assert sorted(r["qa_id"] for c in chunks for r in c) == sorted(r["qa_id"] for r in rows)
+    assert all(len({r["video_path"] for r in c}) == 1 for c in chunks)  # 3 per video, chunks of 2: one video each
+
+    path = tmp_path / "dev_probs.part.json"
+    with pytest.raises(RuntimeError):
+        job.predict_saved(Fake(die_after=3), rows, None, 1, path, chunk=2)
+    first = json.loads(path.read_text())
+    assert len(first) == 3
+    again = Fake()
+    probs = job.predict_saved(again, rows, None, 1, path, chunk=2)
+    assert list(probs) == [r["qa_id"] for r in rows] and not set(again.seen) & set(first)
+    with pytest.raises(job.SessionOver):  # a spanning run past its session's end stops before scoring
+        job.predict_saved(Fake(), rows, None, 1, tmp_path / "other.part.json", stop_at=0.0, chunk=2)

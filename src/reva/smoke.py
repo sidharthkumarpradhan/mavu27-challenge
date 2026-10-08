@@ -67,6 +67,24 @@ def synthetic(root: Path) -> None:
         (root / f"{split}.json").write_text(json.dumps({"metadata": {"total_questions": len(qa)}, "QA": qa}))
 
 
+def resume_check(cfg: dict, out: Path) -> str | None:
+    """A run that spans sessions: the first session has no time left, so it trains its calibration
+    samples, saves a checkpoint and stops; the second resumes it and finishes. None when that works."""
+    cfg = C.override(cfg, {"run_id": "smoke-span", "train.span_sessions": True, "job.max_hours": 0.0})
+    try:
+        job.run(cfg, out / "span", "cpu")
+        return "a session with no time left did not stop"
+    except job.SessionOver:
+        pass
+    if not (out / "span" / "ckpt" / "state.pt").exists():
+        return "no checkpoint after the first session"
+    job.run(C.override(cfg, {"job.max_hours": 1.0}), out / "span", "cpu")
+    stats = json.loads((out / "span" / "train.json").read_text())
+    if stats["sessions"] != 2 or not (out / "span" / "run.json").exists():
+        return f"the resumed run did not finish in its second session: {stats}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="work/smoke")
@@ -90,6 +108,9 @@ def main(argv: list[str] | None = None) -> int:
         meta = json.loads(z.read("predictions.json"))["metadata"]
     if meta != json.loads((out / "data" / "test.json").read_text())["metadata"]:
         print(f"NOT READY: zip metadata {meta} differs from test.json")
+        return 1
+    if problem := resume_check(cfg, out):
+        print(f"NOT READY: {problem}")
         return 1
     print("DEV", json.dumps(result["metrics"]))
     print("READY")
