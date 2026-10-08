@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from reva import score
+from reva.data import DEV_SET
 
 MAX_K = 5
 
@@ -30,6 +31,7 @@ def eligible(runs: list[dict]) -> list[dict]:
     for r in runs:
         cfg = r.get("config") or {}
         if (r.get("status") == "ok" and r.get("zip") and r.get("n", {}).get("test") == 4000 and not r.get("members")
+                and "weighted_accuracy" in (r.get("metrics") or {})  # no fair dev score, no place in a mix
                 and cfg.get("model.use_video") is True and cfg.get("train.refit_with_val") is False
                 and not cfg.get("train.refit")):  # no evidence of a fair run, no place in a mix
             out.append(r)
@@ -115,8 +117,8 @@ def step(kaggle, runs: list[dict], dev: list[dict], test: list[dict], work: Path
     dev_probs = {}
     for r in singles:
         p = load_probs(kaggle, r, work, "dev_probs.json")
-        if set(p) == dev_ids:  # a run scored on another dev split cannot be averaged with the rest
-            dev_probs[r["run_id"]] = p
+        if dev_ids <= set(p):  # older runs scored a larger dev set; average over today's only
+            dev_probs[r["run_id"]] = {q: p[q] for q in dev_ids}
     singles = [r for r in singles if r["run_id"] in dev_probs]
     found = best_ensemble(singles, dev_probs, dev, test, min_cell)
     if not found:
@@ -127,7 +129,7 @@ def step(kaggle, runs: list[dict], dev: list[dict], test: list[dict], work: Path
         return None, ids, f"arena: best is still {run_id}"
     row = {"run_id": run_id, "status": "ok", "members": [{"run_id": m["run_id"], "kernel": m["kernel"]} for m in found["members"]],
            "metrics": found["metrics"], "n": {"dev": len(dev), "test": 4000}, "zip": "rebuilt from members",
-           "hours": 0, "finished": now, "config": {"model.use_video": True, "ensemble": members},
+           "hours": 0, "finished": now, "config": {"model.use_video": True, "ensemble": members}, "dev_set": DEV_SET,
            "why": f"mean of top {len(members)} on dev: {', '.join(members)}; "
                   f"P(beats {found['best']}) {found['p']:.2f}"}
     return row, ids, (f"arena: {run_id} = mean of {len(members)} runs, dev weighted "

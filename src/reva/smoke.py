@@ -57,7 +57,7 @@ def synthetic(root: Path) -> None:
                 v = videos[(len(out) + k) % 3]
                 name, sub = src[v.split("/")[0]]
                 out.append({"qa_id": f"{split}_{len(out) + 1:06d}", "video_path": v, "subdir": sub, "dataset_name": name,
-                            "category": "c", "task": t, "question": f"What is shown ({t})?",
+                            "category": "c", "task": t, "question": f"What is shown ({t}, {split} {k})?",
                             "options": {L: f"option {L}" for L in "ABCD"},
                             "correct_answer": "" if split == "test" else "ABCD"[int(rng.integers(4))]})
         return out

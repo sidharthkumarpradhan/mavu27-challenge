@@ -209,7 +209,7 @@ def run(cfg: dict, out: Path, device: str) -> dict:
     import torch
     import transformers
 
-    result = {"run_id": run_id, "config": cfg, "metrics": metrics, "train": stats, "timings": timings,
+    result = {"run_id": run_id, "config": cfg, "metrics": metrics, "dev_set": data.DEV_SET, "train": stats, "timings": timings,
               "hours": round((time.time() - t0) / 3600, 3), "zip": zip_path.name if zip_path else None,
               "n": {k: len(v) for k, v in sp.items()},
               "versions": {"python": platform.python_version(), "torch": torch.__version__,

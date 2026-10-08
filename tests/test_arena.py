@@ -6,6 +6,7 @@ import pytest
 
 from reva import arena, autopilot, data
 from reva import config as C
+from reva.data import DEV_SET
 from tests.conftest import make_rows
 from tests.test_remote_autopilot import (NOW, QUEUE, TEST, FakeClient, FakeKaggle, board_rows, cfg, probs_for,
                                          seed_annotations)
@@ -36,7 +37,7 @@ def split_probs(rows, right_first_half):
 
 def run(run_id, w, **cfg):
     return {"run_id": run_id, "status": "ok", "zip": "z", "n": {"test": 4000}, "kernel": f"u/{run_id}",
-            "metrics": {"weighted_accuracy": w}, "config": {"model.use_video": True, "train.refit_with_val": False, **cfg}}
+            "metrics": {"weighted_accuracy": w}, "dev_set": DEV_SET, "config": {"model.use_video": True, "train.refit_with_val": False, **cfg}}
 
 
 def test_only_fair_single_runs_compete():
