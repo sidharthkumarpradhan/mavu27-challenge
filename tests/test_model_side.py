@@ -135,3 +135,64 @@ def test_chat_template_kwargs_close_the_think_block():
     row = {"question": "Q?", "options": {L: L.lower() for L in "ABCD"}}
     vlm = VLM({"id": qwen35, "dtype": "fp32", "chat_template_kwargs": {"enable_thinking": False}}, device="cpu")
     assert vlm.chat_text(row, None, list(LETTERS)).endswith("<think>\n\n</think>\n\n")
+
+
+def test_step_count_matches_the_windows_train_takes():
+    pytest.importorskip("torch")
+    from reva.model import count_steps
+
+    assert count_steps([4, 4, 4, 4, 3], accum=8) == 3  # windows of 8, 8 and a short last 3
+    assert count_steps([4, 3, 3, 1], accum=8) == 2  # 10 (groups never split), then 1
+    assert count_steps([1] * 16, accum=8) == 2
+    assert count_steps([2], accum=8, since=6) == 1
+
+
+def _tiny_training_set(n: int = 14):
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    videos = {f"v{k}": {"frames": rng.integers(0, 255, (4, 64, 96, 3), dtype=np.uint8),
+                        "indices": np.array([1, 7, 13, 19]), "fps": 8.0, "total": 24} for k in range(3)}
+    rows = [{"qa_id": f"q{i}", "video_path": f"v{i % 3}", "question": f"What {i}?",
+             "options": {L: f"{L}{i}" for L in "ABCD"}, "correct_answer": "ABCD"[i % 4]} for i in range(n)]
+    return rows, lambda r: videos[r["video_path"]]
+
+
+def test_training_takes_every_planned_step(tmp_path):
+    """Groups of up to 4 never split a window, so the schedule must count the windows train() really
+    takes, short last one included, or the learning rate never reaches the end of its cosine."""
+    pytest.importorskip("torch")
+    from reva.model import VLM, train
+
+    rows, video_of = _tiny_training_set()
+    vlm = VLM({"id": "trl-internal-testing/tiny-Qwen3VLForConditionalGeneration", "dtype": "fp32"}, device="cpu")
+    vlm.add_lora({"grad_ckpt": False})
+    stats = train(vlm, rows, video_of, {"grad_accum": 8, "pack": 4, "lr": 1e-4}, tmp_path, deadline=None)
+    assert stats["pack"] == 4 and stats["samples"] == len(rows)
+    assert stats["steps"] == stats["planned_steps"] >= 2 and stats["loss"] is not None
+
+
+def test_a_prompt_that_does_not_split_falls_back_instead_of_failing(tmp_path, monkeypatch):
+    """One odd prompt must not cost a whole GPU job: inference scores it whole, training unpacked."""
+    torch = pytest.importorskip("torch")
+    import numpy as np
+
+    from reva.model import VLM, train
+
+    rows, video_of = _tiny_training_set(6)
+    vlm = VLM({"id": "trl-internal-testing/tiny-Qwen3VLForConditionalGeneration", "dtype": "fp32"}, device="cpu")
+    vlm.cfg["share_video_prefix"] = False
+    whole = vlm.predict(rows, video_of, perms=2)
+
+    def no_split(*a, **k):
+        raise ValueError("prompt does not split cleanly after the video")
+
+    monkeypatch.setattr(VLM, "encode_video", no_split)
+    vlm.cfg["share_video_prefix"] = True
+    shared = vlm.predict(rows, video_of, perms=2)
+    assert all(np.allclose(shared[q], whole[q], atol=1e-6) for q in whole)
+
+    monkeypatch.setattr(VLM, "packed_logits", no_split)
+    vlm.add_lora({"grad_ckpt": False})
+    stats = train(vlm, rows, video_of, {"grad_accum": 4, "pack": 4}, tmp_path, deadline=None)
+    assert stats["samples"] == len(rows) and torch.isfinite(torch.tensor(stats["loss"]))
