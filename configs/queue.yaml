@@ -30,20 +30,23 @@
   why: zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4
   set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.load_4bit: true}
 
+# From job 3 on, every run scores all 4 cyclic option shifts (infer.perms: 4). With the video
+# encoded once per video (#21) that costs a few short passes per question, and it cancels any
+# letter-position bias.
 # job 3: more frames, and a newer backbone. Qwen3.5-4B reports VideoMME 76.9 and MVBench 71.2 on its
 # model card (read 8 Oct 2026), above Qwen3-VL-8B, and fits a T4 in fp16 where the 8B needs 4-bit.
 # Its chat template opens a <think> block unless enable_thinking is false. Three of its four layers
 # are linear attention (in_proj_qkv, in_proj_z, out_proj), so LoRA targets those too.
 - name: ft-4b-32f
   why: LoRA fine-tune of Qwen3-VL-4B on 32 frames (the paper's frame count). Temporal tasks are the weakest on the board
-  set: {train.enabled: true, frames.n: 32}
+  set: {train.enabled: true, frames.n: 32, infer.perms: 4}
 
 - name: ft-q35-4b-16f
   why: LoRA fine-tune of Qwen3.5-4B, 16 frames. Newer backbone with higher video benchmark scores, and a different model for the arena
-  set: {model.id: Qwen/Qwen3.5-4B, model.chat_template_kwargs: {enable_thinking: false}, train.enabled: true,
+  set: {model.id: Qwen/Qwen3.5-4B, model.chat_template_kwargs: {enable_thinking: false}, train.enabled: true, infer.perms: 4,
         train.lora_targets: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj|in_proj_qkv|in_proj_z|out_proj)'}
 
 # job 4
 - name: ft-8b-4bit-16f
   why: QLoRA fine-tune of Qwen3-VL-8B, 16 frames
-  set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.load_4bit: true, train.enabled: true}
+  set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.load_4bit: true, train.enabled: true, infer.perms: 4}
