@@ -94,6 +94,27 @@ def cmd_autopilot(a) -> int:
     return 0
 
 
+def cmd_colab(a) -> int:
+    """One Colab session (reva.colab): the next Colab queue entry, or with --probe a short GPU check."""
+    import datetime as dt
+
+    from reva import colab, remote
+    from reva.kaggle import from_env
+
+    session = colab.Colab()
+    if a.probe:
+        print(colab.probe(session, a.gpu or "T4"))
+        return 0
+    notes: list[str] = []
+    out = colab.run_next(_cfg(a), remote.load_queue(a.queue), Path(a.state), Path(a.work), session, from_env(), a.sha,
+                         a.hours, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), notes)
+    print("\n".join(notes))
+    if a.outcome:
+        Path(a.outcome).write_text(json.dumps({"ran": (out["ran"] or {}).get("run_id"), "more": out["more"],
+                                               "status": (out["ran"] or {}).get("status"), "notes": notes}))
+    return 0
+
+
 def cmd_submit(a) -> int:
     """Owner-triggered submission of a finished run: rebuild its zip from its private kernel output,
     run every pre-upload check, submit, wait, record. Skips the dev-gain gate (the owner decided),
@@ -178,6 +199,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--queue", default=queue)
     p.add_argument("--outcome", default=None)
     p.add_argument("--no-push", action="store_true", help="collect and report only")
+    c = sub.add_parser("colab")
+    c.add_argument("--state", default="state")
+    c.add_argument("--work", default="work/colab")
+    c.add_argument("--queue", default="configs/queue.yaml")
+    c.add_argument("--sha", default="HEAD")
+    c.add_argument("--hours", type=float, default=5.0, help="session length; an Actions job lasts at most 6 h")
+    c.add_argument("--gpu", default="", help="GPU for --probe")
+    c.add_argument("--probe", action="store_true")
+    c.add_argument("--outcome")
     s = sub.add_parser("submit")
     s.add_argument("--run", required=True)
     s.add_argument("--state", required=True)
@@ -193,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         from reva import job
 
         return job.main(["--config", a.job_config, "--out", a.out, "--device", a.device])
-    return {"fetch": cmd_fetch, "board": cmd_board, "build": cmd_build, "autopilot": cmd_autopilot,
+    return {"fetch": cmd_fetch, "board": cmd_board, "build": cmd_build, "autopilot": cmd_autopilot, "colab": cmd_colab,
             "submit": cmd_submit, "validate": cmd_validate}[a.cmd](a)
 
 

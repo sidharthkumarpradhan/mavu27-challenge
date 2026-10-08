@@ -117,3 +117,14 @@ def test_tests_that_need_torch_skip_without_it():
             imports = any(isinstance(n, ast.ImportFrom) and n.module == "reva.model" for n in ast.walk(fn))
             skips = any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "importorskip" for n in ast.walk(fn))
             assert skips or not imports, f"{path.name}::{fn.name} imports reva.model without importorskip('torch')"
+
+
+def test_the_colab_workflow_saves_its_state_files():
+    import re
+
+    from reva import colab
+    named = set(re.findall(r"^- (\S+\.jsonl) ", colab.__doc__, re.M))
+    text = (ROOT / ".github" / "workflows" / "colab.yml").read_text()
+    saved = set(re.search(r"for f in ([^;]+); do", text).group(1).split())
+    assert named and named <= saved, named - saved
+    assert "secrets.COLAB_TOKEN" in text and "chmod 600" in text  # the token never lands world-readable

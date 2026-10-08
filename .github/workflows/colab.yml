@@ -1,0 +1,111 @@
+# Colab Pro sessions (src/reva/colab.py). One job holds one Colab GPU session: it runs the next
+# Colab entry of configs/queue.yaml, archives the output in a private Kaggle dataset, records the run
+# on the `state` branch, and starts the next session while Colab entries and compute units are left.
+# The Kaggle loop (autopilot.yml) reads the Colab runs and submits the best of everything.
+#
+# Owner's go-ahead for Colab and for storing its login token: 8 Oct 2026.
+# Secrets: COLAB_TOKEN (the token.json the Colab CLI saved after the owner's one-time login),
+# KAGGLE_USERNAME, KAGGLE_KEY (archive datasets), optional KAGGLE_USERNAME_NEW, KAGGLE_KEY_NEW.
+# Kill switch: the repo variable COLAB=off.
+# Run "probe" by hand first: a T4 session that prints the GPU and the compute-unit balance.
+name: colab
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: "Only check the login and a T4 session"
+        type: boolean
+        default: false
+      hours:
+        description: "Session length in hours (an Actions job lasts at most 6)"
+        default: "5.0"
+
+concurrency:
+  group: colab  # one session at a time: Colab Pro's units are shared
+  cancel-in-progress: false
+
+permissions:
+  actions: write  # the next session
+  contents: write  # the state branch
+
+jobs:
+  session:
+    if: vars.COLAB != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      COLAB_TOKEN: ${{ secrets.COLAB_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_USERNAME_NEW: ${{ secrets.KAGGLE_USERNAME_NEW }}
+      KAGGLE_KEY_NEW: ${{ secrets.KAGGLE_KEY_NEW }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main  # only merged code runs on Colab
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # the Colab CLI needs 3.12 or newer
+
+      - name: Install (no torch; the session runs on Colab)
+        run: python -m pip install -q -e ".[remote,dev]" "google-colab-cli==0.7.4"
+
+      - name: Colab login
+        run: |
+          test -n "$COLAB_TOKEN" || { echo "COLAB_TOKEN not set: run the one-time login (see src/reva/colab.py)"; exit 1; }
+          mkdir -p ~/.config/colab-cli
+          printf %s "$COLAB_TOKEN" > ~/.config/colab-cli/token.json
+          chmod 600 ~/.config/colab-cli/token.json
+
+      - name: Probe
+        if: inputs.probe
+        run: python -m reva.cli colab --probe --gpu T4
+
+      - name: State branch
+        if: ${{ !inputs.probe }}
+        run: |
+          git fetch -q origin state
+          git worktree add -B state state origin/state
+
+      - name: Session
+        if: ${{ !inputs.probe }}
+        env:
+          HOURS: ${{ inputs.hours || '5.0' }}
+        run: |
+          python -m reva.cli colab --state state --work work/colab --sha "$(git rev-parse HEAD)" \
+            --hours "$HOURS" --outcome outcome.json
+
+      - name: Save state
+        if: always() && !inputs.probe
+        run: |
+          [ -d state ] || exit 0
+          cd state
+          git config user.name "Sidharth Pradhan"
+          git config user.email "sidharthp@assignall.ai"
+          for f in colab_runs.jsonl colab_jobs.jsonl; do [ -f "$f" ] && git add -- "$f"; done
+          git diff --cached --quiet && exit 0
+          git commit -q -m "colab: state at $(date -u +%Y-%m-%dT%H:%MZ)"
+          # the autopilot pushes to the same branch; its files and these never overlap
+          for wait in 0 10 30 60; do
+            sleep "$wait"
+            git pull -q --rebase origin state && git push -q origin state && exit 0
+          done
+          exit 1
+
+      - name: Stop any session left running (a cancelled job skips the session's own cleanup)
+        if: always()
+        run: |
+          colab sessions 2>/dev/null | grep -o 'reva-[A-Za-z0-9-]*' | sort -u | while read -r s; do
+            colab stop -s "$s" || true
+          done
+
+      - name: Start the next session
+        if: success() && !inputs.probe
+        run: |
+          python -c "import json,sys; sys.exit(0 if json.load(open('outcome.json'))['more'] else 1)" \
+            || { echo "no more Colab work, or no units left"; exit 0; }
+          gh workflow run colab.yml --ref main --repo "$GITHUB_REPOSITORY"

@@ -64,6 +64,21 @@ These are the first things the first job will tell us. Check its log before trus
   keys with a fallback in code. A test pins job 2's ids.
 - The owner has an OpenReview account (8 Oct 2026). Workshop paper due Oct 20.
 
+## Added late 8 Oct 2026
+
+- ft-8b-4bit-16f (a third of an epoch) took the board from 0.7410 to 0.8125 (6th). Training time is
+  the lever, so fine-tunes now train a full epoch across sessions (`train.span_sessions`).
+- Checkpoints: training saves a full checkpoint every 20 minutes, inference every 100 questions.
+  After each job every lane's folder goes to the private Kaggle dataset `reva-run-<run id>` (one
+  version per session, logs and config included) and an unfinished run resumes from it (#35, #36).
+- Every push gets its own kernel slug (#34); a reused slug had overwritten zs-8b-4bit's outputs.
+- Dev leaves out the 1,456 val questions that copy train questions (#38): 1,805 questions.
+  ft-8b-4bit-16f scores 0.813 on it against 0.8125 on the board.
+- The fp16 4B ran out of memory on a T4 with 4-question packs; training now halves the pack (#40).
+- Colab Pro backend (`reva.colab`, `colab.yml`): one A100 session at a time for `backend: colab`
+  queue entries. Needs the `COLAB_TOKEN` secret; run the workflow with "probe" first to read the
+  compute-unit balance and the real burn rate.
+
 ## Next steps, in order
 
 1. Job 1 (`zs-4b` + `text-4b`): read seconds per question and dev accuracy per task. The loop

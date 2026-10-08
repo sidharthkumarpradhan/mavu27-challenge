@@ -81,7 +81,9 @@ From the Codabench pages (read in full 6 Oct 2026):
   100 submissions a day. Using that to infer test labels is label probing. We do not do it. A
   submission is only made when the local dev score improves; the board result only calibrates.
 - Never commit test predictions or probabilities to this repo. It is public. Predictions stay in
-  private Kaggle kernel outputs and go straight to Codabench.
+  private Kaggle kernel outputs and go straight to Codabench. A Colab run has no kernel output, so
+  its predictions stay in its private Kaggle dataset `reva-run-<run id>` (owner's go-ahead for
+  Colab, 8 Oct 2026). Archives of Kaggle runs leave test predictions out.
 - 392 test questions share video, question text and option set with the labeled val split (letters
   shuffled; measured 6 Oct 2026). A lookup table is not a model. It stays off. Whether the final
   refit may train on val is the owner's call (`train.refit_with_val`, default false).
@@ -126,6 +128,12 @@ From the Codabench pages (read in full 6 Oct 2026):
 - The agent flagged that Kaggle allows one account per person, so a second account for more GPU
   quota risks a ban of both accounts and their private kernel outputs. The owner accepted that risk.
   Codabench is unaffected: we still submit from the one Codabench account.
+- Colab Pro on the owner's university Google account (owner, 8 Oct 2026: "Yes, I accept both, let's
+  use colab"). He accepted storing the Colab CLI's login token as the `COLAB_TOKEN` secret, and
+  driving Colab from automation although its FAQ says Colab prioritizes interactive compute. One
+  account only: the FAQ forbids multiple accounts to get around limits. `.github/workflows/colab.yml`
+  runs one session at a time for the queue entries marked `backend: colab` (`reva.colab`); kill
+  switch: repo variable `COLAB=off`.
 
 ## Verified facts (6 Oct 2026)
 
