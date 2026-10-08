@@ -1,7 +1,7 @@
-# ReVA autopilot status (2026-10-08T07:09:20Z)
+# ReVA autopilot status (2026-10-08T07:29:37Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 8 rows, 1 new; leader mkhlystun 0.8795
+- leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
 - job tubu9938/reva-ft-4b-16f-830869b1 is running
 
 ## Leaderboard (top 8)
