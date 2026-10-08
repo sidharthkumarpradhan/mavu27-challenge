@@ -76,8 +76,13 @@ These are the first things the first job will tell us. Check its log before trus
   ft-8b-4bit-16f scores 0.813 on it against 0.8125 on the board.
 - The fp16 4B ran out of memory on a T4 with 4-question packs; training now halves the pack (#40).
 - Colab Pro backend (`reva.colab`, `colab.yml`): one A100 session at a time for `backend: colab`
-  queue entries. Needs the `COLAB_TOKEN` secret; run the workflow with "probe" first to read the
-  compute-unit balance and the real burn rate.
+  queue entries. The autopilot starts a session after any cycle in which a Colab entry is pending
+  and no Colab run is active (#42, #43). After a failed Colab run it waits for main to move, so a
+  merged fix gets one try; a changed secret alone does not move main (start colab.yml by hand).
+- `COLAB_TOKEN` must be the whole `~/.config/colab-cli/token.json`. Set it with
+  `gh secret set COLAB_TOKEN < ~/.config/colab-cli/token.json`: the file has no trailing newline,
+  so a terminal copy picks up the shell prompt and the JSON breaks (first two runs, 8 Oct).
+  `reva.cli colab --check-token` names the problem without printing the token (#44).
 
 ## Next steps, in order
 
