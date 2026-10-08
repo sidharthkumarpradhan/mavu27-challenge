@@ -145,6 +145,10 @@ def test_the_autopilot_starts_colab_sessions_every_cycle(tmp_path):
     gh.parent.mkdir()
     gh.write_text('#!/bin/sh\necho "$*" >> "$GH_LOG"\n[ "$1" = run ] && cat "$GH_RUNS"\nexit 0\n')
     gh.chmod(0o755)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "m"], cwd=tmp_path, check=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
 
     def start(runs, colab=""):
         (tmp_path / "runs.json").write_text(runs)
@@ -157,5 +161,7 @@ def test_the_autopilot_starts_colab_sessions_every_cycle(tmp_path):
 
     assert start("[]")  # pending entry, nothing running: start one
     assert not start('[{"status": "in_progress", "conclusion": ""}]')  # one session at a time
-    assert not start('[{"status": "completed", "conclusion": "failure"}]')  # a failure needs a fix first
+    failed = '[{"status": "completed", "conclusion": "failure", "headSha": "%s"}]'
+    assert not start(failed % head)  # a failure needs a fix first
+    assert start(failed % "0ld")  # the fix moved main: try the new code once
     assert not start("[]", colab="off")  # kill switch

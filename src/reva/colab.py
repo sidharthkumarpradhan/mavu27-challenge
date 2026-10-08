@@ -302,6 +302,38 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
     return {"ran": row, "more": more}
 
 
+TOKEN = Path("~/.config/colab-cli/token.json").expanduser()
+TOKEN_FIELDS = ("refresh_token", "client_id", "client_secret")
+
+
+def _google_refresh(info: dict) -> None:
+    from google.auth.transport.requests import Request  # comes with the Colab CLI
+    from google.oauth2.credentials import Credentials
+
+    Credentials.from_authorized_user_info(info).refresh(Request())
+
+
+def check_token(path: Path = TOKEN, refresh: Callable[[dict], None] | None = None) -> str:
+    """Why the stored login would fail, before any session. The CLI hides it: on a token it cannot
+    use it starts the browser login, which fails on a closed stdin (first session, 8 Oct 2026).
+    Prints field names and Google's error only, never a value."""
+    redo = "Log in again with `colab usage` and store the whole ~/.config/colab-cli/token.json as COLAB_TOKEN."
+    try:
+        info = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as e:
+        raise ColabError(f"COLAB_TOKEN is not the JSON file the CLI saves ({type(e).__name__}). {redo}") from None
+    if not isinstance(info, dict):
+        raise ColabError(f"COLAB_TOKEN is JSON but not an object. {redo}")
+    missing = [k for k in TOKEN_FIELDS if not info.get(k)]
+    if missing:
+        raise ColabError(f"COLAB_TOKEN lacks {', '.join(missing)} (it has {', '.join(sorted(info))}). {redo}")
+    try:
+        (refresh or _google_refresh)(info)
+    except Exception as e:  # google.auth RefreshError and network errors alike
+        raise ColabError(f"Google refused to refresh the Colab login: {e}. {redo}") from None
+    return f"Colab login ok (fields: {', '.join(sorted(info))})"
+
+
 def probe(colab: Colab, gpu: str = "T4") -> str:
     """A short check that the login, the subscription and a GPU session work."""
     balance, _ = colab.usage()
