@@ -59,6 +59,13 @@ def test_pending_skips_done_and_repeat_failures():
     assert [c["run_id"] for c in left] == [ids[2]]
 
 
+def test_queue_edits_keep_the_running_job_ids():
+    # job 2 was pushed as these ids on 7 Oct 2026. A new default in competition.yaml changes every
+    # config hash, so the running lanes would look new and run a second time.
+    left = remote.pending(cfg(), remote.load_queue("configs/queue.yaml"), done=set(), failed={})
+    assert {"ft-4b-16f-830869b1", "zs-8b-4bit-029fe922"} <= {c["run_id"] for c in left}
+
+
 def test_queue_names_are_checked(tmp_path):
     p = tmp_path / "q.yaml"
     p.write_text("- name: 'bad name; rm -rf /'\n  set: {}\n")

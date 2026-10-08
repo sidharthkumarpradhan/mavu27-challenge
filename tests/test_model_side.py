@@ -66,3 +66,14 @@ def test_shared_video_prefix_matches_full_forward():
         whole = vlm.predict(rows, lambda r: videos[r["video_path"]], perms=3)
         for q in whole:
             assert np.allclose(shared[q], whole[q], atol=1e-5), (model_id, stamps, lora, q, shared[q], whole[q])
+
+
+def test_chat_template_kwargs_close_the_think_block():
+    """Qwen3.5 opens <think> by default, so the next token would not be the answer letter."""
+    pytest.importorskip("torch")
+    from reva.model import VLM
+
+    qwen35 = "trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration"
+    row = {"question": "Q?", "options": {L: L.lower() for L in "ABCD"}}
+    vlm = VLM({"id": qwen35, "dtype": "fp32", "chat_template_kwargs": {"enable_thinking": False}}, device="cpu")
+    assert vlm.chat_text(row, None, list(LETTERS)).endswith("<think>\n\n</think>\n\n")
