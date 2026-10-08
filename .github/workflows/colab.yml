@@ -78,7 +78,7 @@ jobs:
           HOURS: ${{ inputs.hours || '5.0' }}
         run: |
           python -m reva.cli colab --state state --work work/colab --sha "$(git rev-parse HEAD)" \
-            --hours "$HOURS" --outcome outcome.json
+            --hours "$HOURS" --outcome outcome.json --live
 
       - name: Save state
         if: always() && !inputs.probe
@@ -87,7 +87,7 @@ jobs:
           cd state
           git config user.name "Sidharth Pradhan"
           git config user.email "sidharthp@assignall.ai"
-          for f in colab_runs.jsonl colab_jobs.jsonl; do [ -f "$f" ] && git add -- "$f"; done
+          for f in colab_runs.jsonl colab_jobs.jsonl colab_live.json; do [ -f "$f" ] && git add -- "$f"; done
           git diff --cached --quiet && exit 0
           git commit -q -m "colab: state at $(date -u +%Y-%m-%dT%H:%MZ)"
           # the autopilot pushes to the same branch; its files and these never overlap

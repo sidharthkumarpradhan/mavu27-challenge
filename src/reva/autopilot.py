@@ -414,6 +414,18 @@ def submit_as(client, cfg: dict) -> int | None:
     return client.organization_id(name) if name else None
 
 
+def colab_note(state: Path) -> str | None:
+    """One line on the Colab session in progress, from colab_live.json (reva.colab)."""
+    try:
+        live = json.loads((state / "colab_live.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if live.get("stage") == "done":
+        return None
+    return (f"Colab: {live.get('run_id')} on {live.get('gpu')}, {live.get('hours_in', 0):.1f} h in at "
+            f"{live.get('updated')}, {live.get('units_before')} units at start; last log line: {live.get('last') or '-'}")
+
+
 def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: str, kaggle_users: str | list[str],
           client=None, auto_submit: bool = False, now: dt.datetime | None = None,
           fetch_board=None, push: bool = True, notes: list[str] | None = None, fetch_columns=None) -> dict:
@@ -483,6 +495,9 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
             notes.append(f"collected {out['collected']}")
         else:
             notes.append(f"job {active['kernel']} is {kstate}")
+    live = colab_note(state)
+    if live:
+        notes.append(live)
 
     # 3a. every run on the same dev set: older runs are rescored once (data.unseen)
     clean_path = state / "dev_clean.json"

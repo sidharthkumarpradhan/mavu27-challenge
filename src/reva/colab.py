@@ -21,6 +21,8 @@ dataset is the run's private store, as a kernel output is for a Kaggle run; noth
 this public repo (CLAUDE.md compliance rules). State, on the `state` branch:
 - colab_runs.jsonl   one row per Colab session's run, the same schema as runs.jsonl
 - colab_jobs.jsonl   one row per Colab session: run, GPU, hours, compute units before and after
+- colab_live.json    the session in progress: run, GPU, hours in, the job's last log line. Pushed
+                     every 20 minutes, because Actions shows a job's log to the API only once it ends.
 """
 
 from __future__ import annotations
@@ -172,11 +174,12 @@ def exit_code(poll: str) -> int | None:
 
 def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: str, hours: float, work: Path,
             restore: Path | None = None, poll_s: float = 300, sleep=time.sleep, clock=time.time,
-            log=print) -> tuple[Path | None, str, float, bool]:
+            log=print, progress: Callable[..., None] | None = None) -> tuple[Path | None, str, float, bool]:
     """Run one lane in one Colab session. Returns (the downloaded output folder or None, the last
     log tail, wall hours, whether the job ended by itself). The session is always stopped."""
     run_id, t0 = cfg["run_id"], clock()
     name = f"reva-{run_id}"[:40]
+    report = progress or (lambda **kw: None)
     colab.new(name, gpu)
     tail, ended = "", False
     try:
@@ -184,6 +187,7 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
             colab.upload(name, restore, "/content/restore.tar")
             log(colab.exec(name, restore_code(run_id), timeout=600).strip())
         log(colab.exec(name, start_code(cfg, sha, repo, pip), timeout=120).strip())
+        report(stage="started", hours_in=(clock() - t0) / 3600, last="")
         end = t0 + 3600 * hours - 1200  # leave 20 minutes to download and archive
         while True:
             sleep(poll_s)
@@ -192,8 +196,10 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
             except ColabError as e:  # one failed read is not a lost session; the next poll decides
                 log(f"poll failed: {e}")
                 continue
-            log(tail.strip().splitlines()[-1] if tail.strip() else "(empty poll)")
+            last = tail.strip().splitlines()[-2] if len(tail.strip().splitlines()) > 1 else "(no log yet)"
+            log(last)
             ended = exit_code(tail) is not None
+            report(stage="ended" if ended else "running", hours_in=(clock() - t0) / 3600, last=last)
             if ended or clock() > end:
                 break
         colab.exec(name, tar_code(run_id), timeout=1200)
@@ -243,7 +249,8 @@ def last_rate(state: Path, gpu: str) -> float:
 
 
 def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Colab, kaggle, sha: str,
-             max_hours: float, now_iso: str, notes: list[str], **session_kw) -> dict:
+             max_hours: float, now_iso: str, notes: list[str], publish: Callable[[], None] | None = None,
+             **session_kw) -> dict:
     """One Colab session for the next pending Colab entry. Returns {"ran", "more"}: the run row
     (or None) and whether another session has work and units to do it."""
     from reva import autopilot, registry
@@ -273,6 +280,15 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
         notes.append(f"Colab: resuming {lane['run_id']} from {saved[-1]}")
 
     cfg = lane_config(base, lane, hours)
+
+    def live(**kw):  # what the session is doing, for STATUS readers while it runs
+        (state / "colab_live.json").write_text(json.dumps({
+            "run_id": lane["run_id"], "gpu": gpu, "started": now_iso, "units_before": balance,
+            "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **kw}, indent=1))
+        if publish:
+            publish()
+
+    session_kw.setdefault("progress", live)
     notes.append(f"Colab: {lane['run_id']} on {gpu} for up to {hours:.1f} h ({balance:.1f} units, about {rate:.1f}/h)")
     out_dir, log_tail, wall, ended = session(colab, cfg, sha, C.get(base, "remote.repo"), C.get(base, "remote.pip"), gpu,
                                       hours, work, restore, **session_kw)
@@ -298,8 +314,39 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
         "run_id": lane["run_id"], "gpu": gpu, "started": now_iso, "hours": round(wall, 2), "units_before": balance,
         "units_after": after, "rate": round(used / wall, 2) if wall > 0.2 and used > 0 else None, "status": row["status"]})
     notes.append(f"Colab: {lane['run_id']} {row['status']} after {wall:.1f} h, {used:.1f} units used, {after:.1f} left")
+    live(stage="done", status=row["status"], hours_in=round(wall, 2), units_after=after)
     more = next_lane(base, queue, autopilot.read_runs(state)) is not None and after / last_rate(state, gpu) - 0.25 >= MIN_HOURS
     return {"ran": row, "more": more}
+
+
+class StatePusher:
+    """Pushes colab_live.json to the state branch at most every `every_s` seconds. A failed push
+    only warns: the session must never stop over its progress report."""
+
+    def __init__(self, state: Path, every_s: float = 1200, git: Callable[[list[str]], int] | None = None,
+                 clock=time.time):
+        self.state, self.every_s, self.clock, self.last = Path(state), every_s, clock, None
+        self.git = git or (lambda args: subprocess.run(["git", "-C", str(self.state), *args],
+                                                       capture_output=True, timeout=120).returncode)
+
+    def __call__(self) -> None:
+        now = self.clock()
+        if self.last is not None and now - self.last < self.every_s:
+            return
+        self.last = now
+        who = ["-c", "user.name=Sidharth Pradhan", "-c", "user.email=sidharthp@assignall.ai"]
+        steps = [("add", ["add", "--", "colab_live.json"]), ("commit", [*who, "commit", "-q", "-m", "colab: live progress"]),
+                 ("pull", [*who, "pull", "-q", "--rebase", "origin", "state"]), ("push", ["push", "-q", "origin", "HEAD:state"])]
+        for verb, args in steps:
+            try:
+                code = self.git(args)
+            except Exception as e:  # a hung or missing git
+                code = type(e).__name__
+            if code != 0:
+                print(f"WARNING live progress not pushed: git {verb} gave {code}", flush=True)
+                if verb == "pull":
+                    self.git(["rebase", "--abort"])
+                return
 
 
 TOKEN = Path("~/.config/colab-cli/token.json").expanduser()
