@@ -71,19 +71,24 @@ class VLM:
         if any(len(i) != 1 for i in ids):
             raise ValueError(f"answer letters are not single tokens for {mcfg['id']}: {ids}")
         self.letter_ids = [i[0] for i in ids]
+        self.vision_end = getattr(self.processor, "vision_end_token", "<|vision_end|>")
+        self.vision_end_id = tok.convert_tokens_to_ids(self.vision_end)
 
-    def inputs(self, row: dict, video: dict | None, order: list[str]) -> dict:
-        """Tokenized model input for one question. video=None gives a text-only probe."""
-        from transformers.video_utils import VideoMetadata
-
+    def chat_text(self, row: dict, video: dict | None, order: list[str]) -> str:
+        """The templated prompt: video placeholder (if any), question, options, answer cue."""
         content = [{"type": "video"}] if video is not None else []
         times = None
         if video is not None and self.cfg.get("timestamps_in_text"):
             times = [float(i) / float(video["fps"]) for i in video["indices"]]
         content.append({"type": "text", "text": prompt_text(row, order, times)})
-        text = self.processor.apply_chat_template([{"role": "user", "content": content}],
+        return self.processor.apply_chat_template([{"role": "user", "content": content}],
                                                   add_generation_prompt=True, tokenize=False)
-        kw = {"text": [text], "return_tensors": "pt"}
+
+    def inputs(self, row: dict, video: dict | None, order: list[str]) -> dict:
+        """Tokenized model input for one question. video=None gives a text-only probe."""
+        from transformers.video_utils import VideoMetadata
+
+        kw = {"text": [self.chat_text(row, video, order)], "return_tensors": "pt"}
         if video is not None:
             fps = float(video["fps"])
             kw["videos"] = [video["frames"]]
@@ -100,17 +105,57 @@ class VLM:
         out = self.model(**batch, logits_to_keep=1)
         return out.logits[0, -1, self.letter_ids].float()
 
+    # Inference shares the video between questions. The prompt is [video][question and options], so
+    # the KV cache after the video is the same for every question about that video and every option
+    # shift. On a T4 the video prefix (vision encoder plus about 2,000 tokens) is nearly all of the
+    # 3 to 4 s a question cost when each was run whole (job 1, 7 Oct 2026). Videos have about 4
+    # test questions each, so encoding once per video cuts inference several fold and makes
+    # option-shift TTA almost free.
+    def _base(self):
+        """The CausalLM under any PEFT wrapper. LoRA layers sit inside it, so they still apply."""
+        return self.model.get_base_model() if hasattr(self.model, "get_base_model") else self.model
+
+    def encode_video(self, row: dict, video: dict):
+        """(KV cache, prefix length) for the prompt up to and including the end-of-video token."""
+        batch = self.inputs(row, video, list(LETTERS))
+        ids = batch["input_ids"]
+        end = (ids[0] == self.vision_end_id).nonzero()
+        if len(end) == 0:
+            raise ValueError(f"no end-of-video token in the prompt for {row['qa_id']}")
+        n = int(end[-1]) + 1
+        kw = {k: (v[:, :n] if v.dim() >= 2 and v.shape[:2] == ids.shape else v) for k, v in batch.items()}
+        out = self._base().model(**kw, use_cache=True)
+        return out.past_key_values, n
+
+    def suffix_logits(self, cache, n: int, row: dict, video: dict, order: list[str]) -> torch.Tensor:
+        """(4,) letter logits for one question, reusing the video prefix cache of length n."""
+        text = self.chat_text(row, video, order)
+        tail = text[text.rindex(self.vision_end) + len(self.vision_end):]
+        ids = self.processor.tokenizer(tail, add_special_tokens=False, return_tensors="pt").input_ids
+        base = self._base()
+        h = base.model(input_ids=ids.to(self.device), past_key_values=cache, use_cache=True).last_hidden_state
+        cache.crop(n)  # back to the bare video prefix for the next question
+        return base.lm_head(h[:, -1])[0, self.letter_ids].float()
+
     @torch.no_grad()
     def predict(self, rows: list[dict], video_of, perms: int = 1, log_every: int = 200) -> dict[str, list[float]]:
         """{qa_id: [pA, pB, pC, pD]} in original option order, averaged over `perms` shifts."""
         self.model.eval()
-        out, t0 = {}, time.time()
+        share = self.cfg.get("share_video_prefix", True)
+        out, t0, prefix = {}, time.time(), (None, None, 0)
         for n, row in enumerate(sorted(rows, key=lambda r: (r["video_path"], r["qa_id"])), 1):
             video = video_of(row)
+            shared = share and video is not None
+            if shared and prefix[0] != row["video_path"]:
+                prefix = (None, None, 0)  # free the last video's cache before building the next
+                prefix = (row["video_path"], *self.encode_video(row, video))
             probs = np.zeros(4)
             for k in range(perms):
                 order = shift(k)
-                logits = self.letter_logits(self.inputs(row, video, order))
+                if shared:
+                    logits = self.suffix_logits(prefix[1], prefix[2], row, video, order)
+                else:
+                    logits = self.letter_logits(self.inputs(row, video, order))
                 if not torch.isfinite(logits).all():  # fp16 overflow: fail loudly, never score garbage
                     raise FloatingPointError(f"non-finite logits on {row['qa_id']}; use dtype fp32 or bf16")
                 p = torch.softmax(logits, -1).cpu().numpy()
