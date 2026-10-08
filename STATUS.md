@@ -1,7 +1,9 @@
-# ReVA autopilot status (2026-10-08T22:20:47Z)
+# ReVA autopilot status (2026-10-08T22:26:25Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
+- Kaggle weekly GPU quota reached on account 1
+- pushed tubu9938/reva-ft-8b-4bit-16f-1ep-2d94b189-10082226 with ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d'], sized to the 6.5 h account 2 has left this week
 
 ## Leaderboard (top 8)
 
@@ -61,4 +63,4 @@
 | text-4b-f571bdb5 | ok | 0.4835 | 0.4953 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
 
 Submissions used: 3 of 100. GPU hours, last 7 days: 30.3 of 30.
-Active job: none
+Active job: tubu9938/reva-ft-8b-4bit-16f-1ep-2d94b189-10082226 ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d']
