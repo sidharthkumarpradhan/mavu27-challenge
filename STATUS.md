@@ -1,9 +1,8 @@
-# ReVA autopilot status (2026-10-08T22:26:25Z)
+# ReVA autopilot status (2026-10-08T22:42:00Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- Kaggle weekly GPU quota reached on account 1
-- pushed tubu9938/reva-ft-8b-4bit-16f-1ep-2d94b189-10082226 with ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d'], sized to the 6.5 h account 2 has left this week
+- job tubu9938/reva-ft-8b-4bit-16f-1ep-2d94b189-10082226 is running
 
 ## Leaderboard (top 8)
 
