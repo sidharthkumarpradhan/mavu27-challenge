@@ -73,6 +73,9 @@ def sh(cmd):
 os.makedirs(T, exist_ok=True)
 sh(f"rm -rf {{T}}/repo && git init -q {{T}}/repo && cd {{T}}/repo && git fetch -q --depth 1 {{REPO}} {{SHA}} && git checkout -q FETCH_HEAD")
 sh("pip install -q " + " ".join(f'"{{p}}"' for p in PIP))
+# the image ships torchao 0.10.0 (8 Oct 2026); peft 0.21.2 refuses to add LoRA next to a torchao
+# older than 0.16, and nothing here uses it
+sh("pip uninstall -y -q torchao || true")
 sh(f"pip install -q --no-deps -e {{T}}/repo")
 paths = []
 for cfg in LANES:

@@ -69,6 +69,28 @@ def no_internet(run: dict) -> bool:
     return run.get("status") != "ok" and any(s in run.get("error", "") for s in NO_INTERNET)
 
 
+# A broken environment, not the experiment: the Kaggle image shipped torchao 0.10.0 on 8 Oct 2026,
+# and peft 0.21.2 refuses to add LoRA next to an older torchao.
+ENV_ERRORS = NO_INTERNET + ("Found an incompatible version of",)
+ENV_FREE_TRIES = 3  # environment failures start to count after this many, so a bad fix cannot loop
+
+
+def env_failure(run: dict) -> bool:
+    return run.get("status") != "ok" and any(s in run.get("error", "") for s in ENV_ERRORS)
+
+
+def failures(runs: list[dict]) -> dict[str, int]:
+    """Failures that count against each run's retries. Environment failures are the account's or
+    the image's fault, so the first ENV_FREE_TRIES of them are free."""
+    own: dict[str, int] = {}
+    env: dict[str, int] = {}
+    for r in runs:
+        if r["status"] != "ok":
+            bucket = env if env_failure(r) else own
+            bucket[r["run_id"]] = bucket.get(r["run_id"], 0) + 1
+    return {k: own.get(k, 0) + max(0, env.get(k, 0) - ENV_FREE_TRIES) for k in own.keys() | env.keys()}
+
+
 def offline_until(runs: list[dict], user: str, hours: float = 6) -> dt.datetime | None:
     """When to try `user` again if its latest lane had no internet, else None."""
     mine = [r for r in runs if r.get("kernel", "").split("/")[0].lower() == user.lower() and r.get("finished")]
@@ -374,10 +396,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     jobs = registry.read(state / "jobs.jsonl")
     if push and not active:
         done = {r["run_id"] for r in runs if r["status"] == "ok"}
-        failed: dict[str, int] = {}
-        for r in runs:
-            if r["status"] != "ok" and not no_internet(r):  # an offline account does not use up a lane's retries
-                failed[r["run_id"]] = failed.get(r["run_id"], 0) + 1
+        failed = failures(runs)  # an offline account or a broken image does not use up a lane's retries
         lanes = remote.pending(cfg, queue, done, failed)[: C.get(cfg, "remote.lanes")]
         users = [kaggle_users] if isinstance(kaggle_users, str) else list(kaggle_users)
         if not lanes:
