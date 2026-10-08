@@ -1,10 +1,10 @@
 {
- "kernel": "tubu9938/reva-ft-4b-32f-527078f0",
- "pushed": "2026-10-08T11:12:42Z",
+ "kernel": "tubu9938/reva-ft-q35-4b-16f-e4ba68c0",
+ "pushed": "2026-10-08T11:32:58Z",
  "sha": "f174f338481d1791a63bc064a43e88c66caea196",
  "runs": [
-  "ft-4b-32f-527078f0",
-  "ft-q35-4b-16f-e4ba68c0"
+  "ft-q35-4b-16f-e4ba68c0",
+  "ft-8b-4bit-16f-62f77933"
  ],
- "url": "https://www.kaggle.com/code/tubu9938/reva-ft-4b-32f-527078f0"
+ "url": "https://www.kaggle.com/code/tubu9938/reva-ft-q35-4b-16f-e4ba68c0"
 }
