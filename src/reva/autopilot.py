@@ -418,7 +418,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 notes.append(f"GPU quota pacing on Kaggle account {n}: {used:.1f} h used in 7 days")
                 continue
             kdir = work / "kernel"
-            slug = remote.build(cfg, lanes, sha, kdir, user, hours=hours)
+            slug = remote.build(cfg, lanes, sha, kdir, user, hours=hours, stamp=now.strftime("%m%d%H%M"))
             try:
                 pushed = kaggle.push(kdir, timeout_s=int(3600 * hours),
                                      accelerator=C.get(cfg, "remote.accelerator"))

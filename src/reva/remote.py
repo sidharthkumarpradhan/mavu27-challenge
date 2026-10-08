@@ -102,8 +102,13 @@ print("EXIT", max(codes), flush=True)
 '''
 
 
-def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: str, hours: float | None = None) -> str:
+def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: str, hours: float | None = None,
+          stamp: str = "") -> str:
     """Write kernel-metadata.json and job.py into out_dir. Returns the kernel slug.
+
+    `stamp` (the push time) makes the slug unique. A push to an existing slug makes a new version,
+    and Kaggle serves only the latest version's output, so reusing a slug loses every earlier
+    run's adapter and probabilities (8 Oct 2026: a retry would have overwritten our best run).
 
     `hours` shortens the session to what the account has left this week. Each lane keeps the usual
     margin for setup, and training sizes itself to the shorter lane (reva.job.train_deadline). The
@@ -117,7 +122,9 @@ def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: st
                  for c in lanes]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = f"{user}/reva-{lanes[0]['run_id']}"[:60].rstrip("-").lower()
+    tail = f"-{stamp}" if stamp else ""
+    # Kaggle titles take at most 50 characters; trim the run id, never the stamp
+    slug = f"{user}/" + (f"reva-{lanes[0]['run_id']}"[:50 - len(tail)].rstrip("-") + tail).lower()
     (out_dir / "job.py").write_text(kernel_script(lanes, sha, C.get(base, "remote.repo"), C.get(base, "remote.pip")))
     meta = kernel_metadata(slug, "job.py", gpu=True, accelerator=C.get(base, "remote.accelerator"))
     (out_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=1))
