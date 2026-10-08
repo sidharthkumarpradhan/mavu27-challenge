@@ -128,3 +128,34 @@ def test_the_colab_workflow_saves_its_state_files():
     saved = set(re.search(r"for f in ([^;]+); do", text).group(1).split())
     assert named and named <= saved, named - saved
     assert "secrets.COLAB_TOKEN" in text and "chmod 600" in text  # the token never lands world-readable
+
+
+def test_the_autopilot_starts_colab_sessions_every_cycle(tmp_path):
+    """Regression (8 Oct 2026): the Colab start ran after the 4 h cycle loop, so a pending Colab
+    entry waited up to 4 h for its session. It runs after every cycle now."""
+    import os
+    import subprocess
+
+    assert "bash .github/autopilot/start_colab.sh" in cycles_step()["run"]
+    script = ROOT / ".github" / "autopilot" / "start_colab.sh"
+    (tmp_path / "state").mkdir()
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "queue.yaml").write_text("- name: ft-c\n  backend: colab\n  set: {train.enabled: true}\n")
+    gh = tmp_path / "bin" / "gh"
+    gh.parent.mkdir()
+    gh.write_text('#!/bin/sh\necho "$*" >> "$GH_LOG"\n[ "$1" = run ] && cat "$GH_RUNS"\nexit 0\n')
+    gh.chmod(0o755)
+
+    def start(runs, colab=""):
+        (tmp_path / "runs.json").write_text(runs)
+        log = tmp_path / "gh.log"
+        log.unlink(missing_ok=True)
+        env = {**os.environ, "PATH": f"{gh.parent}:{os.environ['PATH']}", "GH_LOG": str(log),
+               "GH_RUNS": str(tmp_path / "runs.json"), "GITHUB_REPOSITORY": "o/r", "COLAB": colab}
+        subprocess.run(["bash", str(script)], cwd=tmp_path, env=env, check=True, capture_output=True)
+        return "workflow run colab.yml" in (log.read_text() if log.exists() else "")
+
+    assert start("[]")  # pending entry, nothing running: start one
+    assert not start('[{"status": "in_progress", "conclusion": ""}]')  # one session at a time
+    assert not start('[{"status": "completed", "conclusion": "failure"}]')  # a failure needs a fix first
+    assert not start("[]", colab="off")  # kill switch
