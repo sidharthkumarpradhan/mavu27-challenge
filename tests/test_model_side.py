@@ -50,8 +50,9 @@ def test_shared_video_prefix_matches_full_forward():
              "options": {L: f"{L} answer {i}" for L in "ABCD"}} for i, v in enumerate(["a.mp4", "b.mp4", "a.mp4", "a.mp4"])]
     import torch
 
-    for stamps, lora in ((False, False), (True, False), (False, True)):
-        cfg = {"id": TINY, "dtype": "fp32", "timestamps_in_text": stamps}
+    qwen35 = "trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration"  # linear-attention layers
+    for model_id, stamps, lora in ((TINY, False, False), (TINY, True, False), (TINY, False, True), (qwen35, False, False)):
+        cfg = {"id": model_id, "dtype": "fp32", "timestamps_in_text": stamps}
         vlm = VLM({**cfg, "share_video_prefix": True}, device="cpu")
         if lora:  # a trained adapter: nonzero LoRA weights, reached through the PEFT wrapper
             vlm.add_lora({"grad_ckpt": False})
@@ -63,4 +64,4 @@ def test_shared_video_prefix_matches_full_forward():
         vlm.cfg["share_video_prefix"] = False
         whole = vlm.predict(rows, lambda r: videos[r["video_path"]], perms=3)
         for q in whole:
-            assert np.allclose(shared[q], whole[q], atol=1e-5), (stamps, lora, q, shared[q], whole[q])
+            assert np.allclose(shared[q], whole[q], atol=1e-5), (model_id, stamps, lora, q, shared[q], whole[q])

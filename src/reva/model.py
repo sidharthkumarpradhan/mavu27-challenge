@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import random
 import time
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -116,7 +117,7 @@ class VLM:
         return self.model.get_base_model() if hasattr(self.model, "get_base_model") else self.model
 
     def encode_video(self, row: dict, video: dict):
-        """(KV cache, prefix length) for the prompt up to and including the end-of-video token."""
+        """KV cache of the prompt up to and including the end-of-video token."""
         batch = self.inputs(row, video, list(LETTERS))
         ids = batch["input_ids"]
         end = (ids[0] == self.vision_end_id).nonzero()
@@ -124,17 +125,18 @@ class VLM:
             raise ValueError(f"no end-of-video token in the prompt for {row['qa_id']}")
         n = int(end[-1]) + 1
         kw = {k: (v[:, :n] if v.dim() >= 2 and v.shape[:2] == ids.shape else v) for k, v in batch.items()}
-        out = self._base().model(**kw, use_cache=True)
-        return out.past_key_values, n
+        return self._base().model(**kw, use_cache=True).past_key_values
 
-    def suffix_logits(self, cache, n: int, row: dict, video: dict, order: list[str]) -> torch.Tensor:
-        """(4,) letter logits for one question, reusing the video prefix cache of length n."""
+    def suffix_logits(self, cache, row: dict, video: dict, order: list[str]) -> torch.Tensor:
+        """(4,) letter logits for one question on top of the video prefix cache (left unchanged)."""
         text = self.chat_text(row, video, order)
         tail = text[text.rindex(self.vision_end) + len(self.vision_end):]
         ids = self.processor.tokenizer(tail, add_special_tokens=False, return_tensors="pt").input_ids
         base = self._base()
-        h = base.model(input_ids=ids.to(self.device), past_key_values=cache, use_cache=True).last_hidden_state
-        cache.crop(n)  # back to the bare video prefix for the next question
+        # each question runs on a copy: linear-attention layers (Qwen3.5) keep a recurrent state that
+        # cannot be cropped back, and a copy of a few hundred MB on the GPU takes about a millisecond
+        h = base.model(input_ids=ids.to(self.device), past_key_values=copy.deepcopy(cache),
+                       use_cache=True).last_hidden_state
         return base.lm_head(h[:, -1])[0, self.letter_ids].float()
 
     @torch.no_grad()
@@ -142,18 +144,18 @@ class VLM:
         """{qa_id: [pA, pB, pC, pD]} in original option order, averaged over `perms` shifts."""
         self.model.eval()
         share = self.cfg.get("share_video_prefix", True)
-        out, t0, prefix = {}, time.time(), (None, None, 0)
+        out, t0, prefix = {}, time.time(), (None, None)
         for n, row in enumerate(sorted(rows, key=lambda r: (r["video_path"], r["qa_id"])), 1):
             video = video_of(row)
             shared = share and video is not None
             if shared and prefix[0] != row["video_path"]:
-                prefix = (None, None, 0)  # free the last video's cache before building the next
-                prefix = (row["video_path"], *self.encode_video(row, video))
+                prefix = (None, None)  # free the last video's cache before building the next
+                prefix = (row["video_path"], self.encode_video(row, video))
             probs = np.zeros(4)
             for k in range(perms):
                 order = shift(k)
                 if shared:
-                    logits = self.suffix_logits(prefix[1], prefix[2], row, video, order)
+                    logits = self.suffix_logits(prefix[1], row, video, order)
                 else:
                     logits = self.letter_logits(self.inputs(row, video, order))
                 if not torch.isfinite(logits).all():  # fp16 overflow: fail loudly, never score garbage
