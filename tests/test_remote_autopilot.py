@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import shutil
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -480,3 +481,90 @@ def test_an_account_with_too_little_left_still_waits(tmp_path):
                                             "collected": autopilot.iso(NOW - dt.timedelta(hours=1))})
     out = autopilot.cycle(cfg(), QUEUE, state, work, k, "sha", ["second"], now=NOW, fetch_board=board_rows)
     assert out["pushed"] is None and not k.pushed  # 3.5 h cannot train and score
+
+
+class SavingKaggle(FakeKaggle):
+    """Lanes that stop part way: one spanning run saved at a session's end, one crashed after a checkpoint."""
+
+    def __init__(self):
+        super().__init__(lanes_ok=False)
+        self.datasets, self.downloads = {}, []
+
+    def output(self, slug, dest, file_pattern=None):
+        super().output(slug, dest, file_pattern)
+        first, second = self.active_runs[:2]
+        (dest / first / "ckpt" / "adapter").mkdir(parents=True)
+        (dest / first / "ckpt" / "state.pt").write_bytes(b"state")
+        (dest / first / "partial.json").write_text(json.dumps({"where": "training: step 40"}))
+        (dest / second / "train.json").write_text("{}")
+        (dest / second / "test_probs.part.json").write_text("{}")  # never leaves the kernel output
+        (dest / f"{slug.split('/')[-1]}.log").write_text("kernel log")
+        return [], "EXIT 3"
+
+    def dataset_upload(self, folder, ref, message, **kwargs):
+        with tarfile.open(next(Path(folder).glob("*.tar"))) as t:
+            self.datasets[ref] = sorted(t.getnames())
+
+    def dataset_download(self, ref, dest):
+        self.downloads.append(ref)
+        run_id = ref.split("reva-run-")[1]
+        (Path(dest) / run_id / "ckpt").mkdir(parents=True)
+        (Path(dest) / run_id / "ckpt" / "state.pt").write_bytes(b"state")
+        return Path(dest)
+
+
+def test_unfinished_runs_are_saved_and_the_next_push_resumes_them(tmp_path):
+    """Owner, 8 Oct 2026: a quota cut or any other failure must not lose what a run got done."""
+    c, state, work, k = cfg(), tmp_path / "state", tmp_path / "work", SavingKaggle()
+    autopilot.cycle(c, QUEUE, state, work, k, "sha1", "first", now=NOW, fetch_board=board_rows)
+    k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "first", now=NOW + dt.timedelta(hours=11),
+                          fetch_board=board_rows, push=False)
+    first, second = k.active_runs[:2]
+    rows = {r["run_id"]: r for r in registry.read(state / "runs.jsonl")}
+    assert rows[first]["status"] == "partial" and rows[first]["where"] == "training: step 40"
+    assert rows[second]["status"] == "failed" and rows[second]["resumable"]
+    assert rows[first]["stash"] == f"first/reva-run-{first}" and f"{first}/ckpt/state.pt" in k.datasets[rows[first]["stash"]]
+    saved = k.datasets[rows[second]["stash"]]
+    assert f"{second}/kernel.log" in saved and f"{second}/log.txt" in saved and f"{second}/train.json" in saved
+    assert not [n for n in saved if "test_probs" in n]
+    assert autopilot.failures(list(rows.values())) == {first: 0, second: 1}
+
+    # the next push goes to the other account: the state is copied there and attached
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha2", "second", now=NOW + dt.timedelta(hours=12),
+                          fetch_board=board_rows)
+    resume = out["pushed"]["resume"]
+    assert resume == {first: f"second/reva-run-{first}", second: f"second/reva-run-{second}"}
+    assert k.downloads == [f"first/reva-run-{first}", f"first/reva-run-{second}"]
+    meta = json.loads((work / "kernel" / "kernel-metadata.json").read_text())
+    assert meta["dataset_sources"] == sorted(resume.values())
+    src = (work / "kernel" / "job.py").read_text()
+    compile(src, "job.py", "exec")
+    assert f"second/reva-run-{first}" in src and "restore(RESUME" in src
+
+
+def test_partial_sessions_count_only_past_the_free_ones():
+    rows = [{"run_id": "a", "status": "partial"}] * (autopilot.FREE_SESSIONS + 1)
+    assert autopilot.failures(rows) == {"a": 1}
+
+
+def test_restore_copies_saved_state_where_the_job_resumes(tmp_path, capsys):
+    inp, work = tmp_path / "input", tmp_path / "working"
+    unpacked = inp / "datasets" / "first" / "reva-run-a" / "a" / "ckpt"
+    unpacked.mkdir(parents=True)
+    (unpacked / "state.pt").write_bytes(b"s")
+    packed = inp / "datasets" / "first" / "reva-run-b"
+    packed.mkdir(parents=True)
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "train.json").write_text("{}")
+    with tarfile.open(packed / "b.tar", "w") as t:
+        t.add(tmp_path / "b", arcname="b")
+    found = remote.restore({"a": "first/reva-run-a", "b": "first/reva-run-b", "c": "first/reva-run-c"}, inp, work)
+    assert set(found) == {"a", "b"}
+    assert (work / "a" / "ckpt" / "state.pt").read_bytes() == b"s" and (work / "b" / "train.json").exists()
+    assert "no saved state for c" in capsys.readouterr().out  # a missing dataset starts fresh, never fails
+
+
+def test_stash_names_fit_kaggle():
+    ref = autopilot.stash_ref("Second", "ft-8b-4bit-16f-62f77933" + "x" * 40)
+    assert ref.startswith("second/reva-run-ft-8b") and len(ref.split("/")[1]) <= 50

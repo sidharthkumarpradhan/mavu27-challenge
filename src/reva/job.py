@@ -3,6 +3,7 @@
     python -m reva.job --config run.json --out /kaggle/working/<run_id> [--device cuda:0]
 
 Writes into --out:
+- config.json     the run's full config, written first (a resumed session checks it is the same run)
 - run.json        config, dev metrics (Codabench columns + weighted_accuracy), timings, versions
 - dev_probs.json  dev probabilities (labeled data only, safe to keep)
 - test_probs.json and <run_id>.zip   test predictions; these never enter the public repo
@@ -152,6 +153,10 @@ def run(cfg: dict, out: Path, device: str) -> dict:
     run_id = cfg["run_id"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "partial.json").unlink(missing_ok=True)  # an earlier session's; this one writes its own
+    saved = out / "config.json"
+    if saved.exists() and json.loads(saved.read_text()).get("run_id") != run_id:  # never resume someone else's state
+        raise RuntimeError(f"{out} holds the state of {json.loads(saved.read_text()).get('run_id')}, not {run_id}")
+    write_json(saved, cfg)  # with the checkpoint, everything a later session needs to carry on
     ann = Path(C.get(cfg, "data.root"))
     sp, cache_dir = prepare(cfg)
     train_on = C.get(cfg, "train.enabled", False)
