@@ -1,11 +1,8 @@
-# ReVA autopilot status (2026-10-08T11:32:58Z)
+# ReVA autopilot status (2026-10-08T11:46:34Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- job tubu9938/reva-ft-4b-32f-527078f0 complete; failed lanes: ['ft-4b-32f-527078f0', 'ft-q35-4b-16f-e4ba68c0'] 
-- collected ['ft-4b-32f-527078f0', 'ft-q35-4b-16f-e4ba68c0']
-- Kaggle weekly GPU quota reached on account 1
-- pushed tubu9938/reva-ft-q35-4b-16f-e4ba68c0 with ['ft-q35-4b-16f-e4ba68c0', 'ft-8b-4bit-16f-62f77933']
+- job tubu9938/reva-ft-q35-4b-16f-e4ba68c0 is running
 
 ## Leaderboard (top 8)
 
