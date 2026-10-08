@@ -124,3 +124,14 @@ def test_linear_attention_models_train_one_question_at_a_time():
     from reva.model import VLM
 
     assert not VLM({"id": "trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration", "dtype": "fp32"}, device="cpu").can_pack()
+
+
+def test_chat_template_kwargs_close_the_think_block():
+    """Qwen3.5 opens <think> by default, so the next token would not be the answer letter."""
+    pytest.importorskip("torch")
+    from reva.model import VLM
+
+    qwen35 = "trl-internal-testing/tiny-Qwen3_5ForConditionalGeneration"
+    row = {"question": "Q?", "options": {L: L.lower() for L in "ABCD"}}
+    vlm = VLM({"id": qwen35, "dtype": "fp32", "chat_template_kwargs": {"enable_thinking": False}}, device="cpu")
+    assert vlm.chat_text(row, None, list(LETTERS)).endswith("<think>\n\n</think>\n\n")
