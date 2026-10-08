@@ -112,6 +112,16 @@ def failures(runs: list[dict]) -> dict[str, int]:
             for k in own.keys() | env.keys() | part.keys()}
 
 
+def read_runs(state: Path) -> list[dict]:
+    """Every run row: Kaggle lanes (runs.jsonl, with the arena's rows) and Colab sessions
+    (colab_runs.jsonl, written by reva.colab). Two files, so the two workflows never edit the same one."""
+    return registry.read(state / "runs.jsonl") + registry.read(state / "colab_runs.jsonl")
+
+
+def kaggle_queue(queue: list[dict]) -> list[dict]:
+    return [q for q in queue if q.get("backend", "kaggle") == "kaggle"]
+
+
 # what reva.job leaves behind that a later session can carry on from
 RESUMABLE = ("ckpt", "ckpt.old", "train.json", "dev_probs.part.json", "test_probs.part.json")
 
@@ -127,16 +137,18 @@ def test_predictions(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     return None if name.startswith("test_probs") or name.endswith(".zip") else info
 
 
-def stash(kaggle, run_dir: Path, ref: str, work: Path, kernel_log: Path | None = None, message: str = "") -> None:
+def stash(kaggle, run_dir: Path, ref: str, work: Path, kernel_log: Path | None = None, message: str = "",
+          keep_test: bool = False) -> None:
     """Upload a run's output folder, as one tar that Kaggle unpacks, as a new version of the private
-    dataset `ref`. Earlier versions stay: each holds one session's state and logs."""
+    dataset `ref`. Earlier versions stay: each holds one session's state and logs. Test predictions
+    stay out unless `keep_test`: a Colab run has no kernel output, so its dataset is its store."""
     folder = work / "stash" / ref.replace("/", "--")
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
     if kernel_log and kernel_log.exists():
         shutil.copy(kernel_log, run_dir / "kernel.log")
     with tarfile.open(folder / f"{run_dir.name}.tar", "w") as t:
-        t.add(run_dir, arcname=run_dir.name, filter=test_predictions)
+        t.add(run_dir, arcname=run_dir.name, filter=None if keep_test else test_predictions)
     kaggle.dataset_upload(folder, ref, message or f"{run_dir.name} state")
 
 
@@ -328,31 +340,34 @@ def summarize_config(cfg: dict) -> dict:
     return {k: C.get(cfg, k) for k in keys}
 
 
+def run_row(run_dir: Path, kernel: str, sha: str, now: dt.datetime, log: str = "") -> dict:
+    """The runs.jsonl row for one lane's output folder: ok with its metrics, partial (a spanning
+    run's session ended), or failed with its log tail."""
+    run_id = run_dir.name
+    rj = run_dir / "run.json"
+    if rj.exists():
+        r = json.loads(rj.read_text())
+        return {"run_id": run_id, "status": "ok", "kernel": kernel, "metrics": r["metrics"], "dev_set": r.get("dev_set"),
+                "hours": r["hours"], "zip": r["zip"], "n": r["n"], "train": r["train"],
+                "timings": r["timings"], "versions": r["versions"], "why": r["config"].get("why", ""),
+                "config": summarize_config(r["config"]), "finished": r["finished"], "sha": sha}
+    lane_log = run_dir / "log.txt"
+    text = lane_log.read_text(errors="replace") if lane_log.exists() else log
+    partial = run_dir / "partial.json"
+    row = {"run_id": run_id, "status": "partial" if partial.exists() else "failed", "kernel": kernel,
+           "finished": iso(now), "sha": sha, "error": tail(text, 30)}
+    if partial.exists():
+        row["where"] = json.loads(partial.read_text()).get("where", "")
+    if any((run_dir / n).exists() for n in RESUMABLE):
+        row["resumable"] = True
+    return row
+
+
 def collect(kaggle, active: dict, work: Path, now: dt.datetime) -> tuple[list[dict], dict, str]:
     """Download a finished job. Returns (run rows, job row, log tail)."""
     dest = work / active["kernel"].split("/")[-1]
     files, log = kaggle.output(active["kernel"], dest)
-    rows = []
-    for run_id in active["runs"]:
-        rj = dest / run_id / "run.json"
-        if rj.exists():
-            r = json.loads(rj.read_text())
-            rows.append({"run_id": run_id, "status": "ok", "kernel": active["kernel"], "metrics": r["metrics"],
-                         "dev_set": r.get("dev_set"),
-                         "hours": r["hours"], "zip": r["zip"], "n": r["n"], "train": r["train"],
-                         "timings": r["timings"], "versions": r["versions"], "why": r["config"].get("why", ""),
-                         "config": summarize_config(r["config"]), "finished": r["finished"], "sha": active["sha"]})
-        else:
-            lane_log = dest / run_id / "log.txt"
-            text = lane_log.read_text(errors="replace") if lane_log.exists() else log
-            partial = dest / run_id / "partial.json"
-            row = {"run_id": run_id, "status": "partial" if partial.exists() else "failed", "kernel": active["kernel"],
-                   "finished": iso(now), "sha": active["sha"], "error": tail(text, 30)}
-            if partial.exists():
-                row["where"] = json.loads(partial.read_text()).get("where", "")
-            if any((dest / run_id / n).exists() for n in RESUMABLE):
-                row["resumable"] = True
-            rows.append(row)
+    rows = [run_row(dest / run_id, active["kernel"], active["sha"], now, log) for run_id in active["runs"]]
     hours = (now - parse_iso(active["pushed"])).total_seconds() / 3600
     job = {"kernel": active["kernel"], "pushed": active["pushed"], "collected": iso(now), "hours": round(hours, 2),
            "runs": active["runs"], "sha": active["sha"]}
@@ -472,14 +487,14 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     # 3a. every run on the same dev set: older runs are rescored once (data.unseen)
     clean_path = state / "dev_clean.json"
     try:
-        clean, settled = rescore(kaggle, registry.read(state / "runs.jsonl"), state, work, cfg), True
+        clean, settled = rescore(kaggle, read_runs(state), state, work, cfg), True
     except Exception as e:  # never stops the loop; nothing is submitted until every run is comparable
         traceback.print_exc()
         clean, settled = json.loads(clean_path.read_text()) if clean_path.exists() else {}, False
         notes.append(f"dev rescoring incomplete this cycle: {type(e).__name__}")
 
     # 3b. arena: an average of the best runs competes with them on dev
-    runs = fair(registry.read(state / "runs.jsonl"), clean)
+    runs = fair(read_runs(state), clean)
     seen_path = state / "arena.json"
     seen = json.loads(seen_path.read_text())["considered"] if seen_path.exists() else []
     if len(arena.eligible(runs)) >= 2 and sorted(r["run_id"] for r in arena.eligible(runs)) != sorted(seen):
@@ -500,7 +515,7 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
 
     # 4. gated submission: the best run not yet submitted, from any cycle
     blocked = {b["run_id"] for b in registry.read(state / "blocked.jsonl")}
-    runs = fair(registry.read(state / "runs.jsonl"), clean)
+    runs = fair(read_runs(state), clean)
     r = candidate(runs, subs, blocked)
     if r:
         fsubs = fair_subs(subs, runs)
@@ -539,12 +554,12 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
 
     # 5. push the next lanes
     subs = latest_submissions(registry.read(state / "submissions.jsonl"))  # include this cycle's submission
-    runs = registry.read(state / "runs.jsonl")
+    runs = read_runs(state)
     jobs = registry.read(state / "jobs.jsonl")
     if push and not active:
         done = {r["run_id"] for r in runs if r["status"] == "ok"}
         failed = failures(runs)  # an offline account or a broken image does not use up a lane's retries
-        lanes = remote.pending(cfg, queue, done, failed)[: C.get(cfg, "remote.lanes")]
+        lanes = remote.pending(cfg, kaggle_queue(queue), done, failed)[: C.get(cfg, "remote.lanes")]
         users = [kaggle_users] if isinstance(kaggle_users, str) else list(kaggle_users)
         if not lanes:
             notes.append("queue empty: add experiments to configs/queue.yaml")

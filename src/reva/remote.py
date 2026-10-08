@@ -35,6 +35,10 @@ def load_queue(path: str | Path) -> list[dict]:
     for it in items:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,30}", str(it.get("name", ""))):
             raise ValueError(f"queue name must be 2-31 chars of a-z, 0-9, '-': {it.get('name')!r}")
+        if it.get("backend", "kaggle") not in ("kaggle", "colab"):
+            raise ValueError(f"{it['name']}: backend must be kaggle or colab, not {it.get('backend')!r}")
+        if "gpu" in it and it.get("backend") != "colab":
+            raise ValueError(f"{it['name']}: gpu is a Colab setting; Kaggle lanes are T4s")
         it.setdefault("set", {})
     return items
 

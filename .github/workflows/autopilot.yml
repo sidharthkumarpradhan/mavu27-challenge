@@ -111,7 +111,9 @@ jobs:
                   [ -f "$f" ] && git add -- "$f"
                 done
                 git add -u -- .
-                git diff --cached --quiet || { git commit -q -m "autopilot: state at $(date -u +%Y-%m-%dT%H:%MZ)" && git push -q origin state; }
+                # the Colab workflow pushes to the same branch (its own files), so rebase first
+                git diff --cached --quiet || { git commit -q -m "autopilot: state at $(date -u +%Y-%m-%dT%H:%MZ)" \
+                  && { git pull -q --rebase origin state || { git rebase --abort || true; }; } && git push -q origin state; }
               ) || echo "::warning::state push failed; the next cycle pushes it again"
             fi
 

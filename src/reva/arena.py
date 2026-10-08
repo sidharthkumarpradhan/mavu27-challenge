@@ -43,8 +43,15 @@ def ensemble_id(members: list[str]) -> str:
 
 
 def fetch(kaggle, run: dict, work: Path, name: str) -> Path:
-    """One file of a single run's private kernel output, downloaded alone when this runner has not
-    got it (the Kaggle CLI matches the pattern against each output path, like "<run_id>/run.json")."""
+    """One file of a single run's private output, downloaded when this runner has not got it: from
+    its kernel output alone (the Kaggle CLI matches the pattern against each output path, like
+    "<run_id>/run.json"), or for a Colab run from its private dataset (reva.colab)."""
+    if run.get("backend") == "colab":
+        dest = work / "datasets" / run["dataset"].replace("/", "--")
+        path = dest / run["run_id"] / name
+        if not path.exists():
+            kaggle.dataset_download(run["dataset"], dest)
+        return path
     dest = work / run["kernel"].split("/")[-1]
     path = dest / run["run_id"] / name
     if not path.exists():
@@ -127,7 +134,8 @@ def step(kaggle, runs: list[dict], dev: list[dict], test: list[dict], work: Path
     run_id = ensemble_id(members)
     if any(r["run_id"] == run_id for r in runs):
         return None, ids, f"arena: best is still {run_id}"
-    row = {"run_id": run_id, "status": "ok", "members": [{"run_id": m["run_id"], "kernel": m["kernel"]} for m in found["members"]],
+    row = {"run_id": run_id, "status": "ok", "members": [{k: m[k] for k in ("run_id", "kernel", "backend", "dataset") if k in m}
+                                          for m in found["members"]],
            "metrics": found["metrics"], "n": {"dev": len(dev), "test": 4000}, "zip": "rebuilt from members",
            "hours": 0, "finished": now, "config": {"model.use_video": True, "ensemble": members}, "dev_set": DEV_SET,
            "why": f"mean of top {len(members)} on dev: {', '.join(members)}; "

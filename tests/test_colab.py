@@ -1,0 +1,190 @@
+"""The Colab backend (reva.colab) against a fake Colab CLI: no network, no GPU."""
+
+import json
+import tarfile
+from pathlib import Path
+
+import pytest
+
+from reva import arena, autopilot, colab, registry, remote
+from reva import config as C
+from reva.data import DEV_SET
+
+QUEUE = [{"name": "ft-k", "set": {"train.enabled": True}},
+         {"name": "ft-c", "backend": "colab", "gpu": "A100", "set": {"train.enabled": True, "model.dtype": "bf16"}}]
+
+
+def cfg():
+    return C.load()
+
+
+class FakeCLI:
+    """Answers the colab commands reva.colab uses. `finish` is what the job leaves in its output."""
+
+    def __init__(self, tmp: Path, finish="ok", balance=90.0, polls_until_done=2):
+        self.tmp, self.finish, self.balance, self.left = tmp, finish, balance, polls_until_done
+        self.calls, self.stopped, self.uploaded, self.started = [], [], [], None
+
+    def __call__(self, cmd, timeout=None):
+        args = cmd[1:]
+        self.calls.append(args[0])
+        if args[0] == "usage":
+            out = f"Current balance: {self.balance:.2f} compute units\nUsage rate: 13.00/hr\nActive assignments: 0"
+            self.balance -= 5  # what a session costs here
+            return 0, out
+        if args[0] == "new":
+            return 0, "[colab] Creating session...\n[colab] Session READY."
+        if args[0] == "stop":
+            self.stopped.append(args[2])
+            return 0, "[colab] Session terminated."
+        if args[0] == "upload":
+            self.uploaded.append(args[3:])
+            return 0, ""
+        if args[0] == "exec":
+            code = Path(args[args.index("-f") + 1]).read_text()
+            if "subprocess.Popen" in code:
+                compile(code, "start", "exec")  # the code sent to the kernel must at least parse
+                self.started = json.loads(json.loads(code.split('.write(')[1].split(')\n')[0]))
+                return 0, "STARTED 42"
+            if "EXIT_CODE" in code:
+                self.left -= 1
+                return 0, "train step 10\nEXIT_CODE " + ("running" if self.left > 0 else "0")
+            return 0, "TARRED" if "tar" in code else "RESTORED []"
+        if args[0] == "download":
+            run_id = self.started["run_id"]
+            d = self.tmp / "vm" / run_id
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "log.txt").write_text("DONE\n")
+            (d / "test_probs.json").write_text("{}")
+            if self.finish == "ok":
+                (d / "run.json").write_text(json.dumps({
+                    "metrics": {"weighted_accuracy": 0.9, "overall_accuracy": 0.9}, "dev_set": DEV_SET, "hours": 3.0,
+                    "zip": f"{run_id}.zip", "n": {"test": 4000}, "train": {}, "timings": {}, "versions": {},
+                    "config": {"why": "w"}, "finished": "2026-10-09T03:00:00Z"}))
+            elif self.finish == "partial":
+                (d / "ckpt").mkdir()
+                (d / "partial.json").write_text(json.dumps({"where": "training: step 300"}))
+            else:  # cut off mid-job: only the periodic checkpoint
+                (d / "ckpt").mkdir()
+            with tarfile.open(args[4], "w") as t:
+                t.add(d, arcname=run_id)
+            return 0, ""
+        raise AssertionError(f"unexpected colab call {args}")
+
+
+class FakeKaggle:
+    users = ["first", "second"]
+
+    def __init__(self):
+        self.datasets, self.downloads = {}, []
+
+    def dataset_upload(self, folder, ref, message, **kwargs):
+        with tarfile.open(next(Path(folder).glob("*.tar"))) as t:
+            self.datasets[ref] = sorted(t.getnames())
+
+    def dataset_download(self, ref, dest):
+        self.downloads.append(ref)
+        run_id = ref.split("reva-run-")[1]
+        (Path(dest) / run_id / "ckpt").mkdir(parents=True)
+        return Path(dest)
+
+
+def run(tmp_path, cli, kaggle=None, state=None):
+    state = state or tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    notes = []
+    out = colab.run_next(cfg(), QUEUE, state, tmp_path / "work", colab.Colab(runner=cli), kaggle or FakeKaggle(), "abc",
+                         5.0, "2026-10-09T00:00:00Z", notes, poll_s=0, sleep=lambda s: None)
+    return out, notes, state
+
+
+def test_a_colab_session_runs_the_colab_entry_and_archives_everything(tmp_path):
+    cli, k = FakeCLI(tmp_path), FakeKaggle()
+    out, notes, state = run(tmp_path, cli, k)
+    row = out["ran"]
+    assert row["run_id"].startswith("ft-c-") and row["status"] == "ok" and row["backend"] == "colab"
+    assert cli.started["run_id"] == row["run_id"] and cli.started["data"]["root"] == "/content/reva"
+    assert cli.started["job"]["max_hours"] <= 5.0 - colab.SETUP_H
+    assert cli.stopped == [f"reva-{row['run_id']}"[:40]]  # the session never outlives the job
+    # a Colab run has no kernel output: its dataset keeps the test probabilities, privately
+    assert row["dataset"] == f"first/reva-run-{row['run_id']}" and f"{row['run_id']}/test_probs.json" in k.datasets[row["dataset"]]
+    assert registry.read(state / "colab_runs.jsonl") == [row]
+    job = registry.read(state / "colab_jobs.jsonl")[0]
+    assert job["gpu"] == "A100" and job["units_before"] == 90.0 and job["units_after"] == 85.0
+    assert out["more"] is False  # nothing else is queued for Colab
+
+
+def test_the_kaggle_loop_sees_colab_runs_but_never_pushes_colab_entries(tmp_path):
+    _, _, state = run(tmp_path, FakeCLI(tmp_path))
+    runs = autopilot.read_runs(state)
+    assert [r["backend"] for r in runs] == ["colab"]
+    assert [c["run_id"].rsplit("-", 1)[0] for c in remote.pending(cfg(), autopilot.kaggle_queue(QUEUE), set(), {})] == ["ft-k"]
+
+
+def test_an_unfinished_colab_run_resumes_from_its_archive(tmp_path):
+    cli, k = FakeCLI(tmp_path, finish="partial"), FakeKaggle()
+    first, _, state = run(tmp_path, cli, k)
+    assert first["ran"]["status"] == "partial" and first["ran"]["resumable"] and first["more"]
+    again = FakeCLI(tmp_path / "2")
+    second, notes, _ = run(tmp_path, again, k, state)
+    assert k.downloads == [first["ran"]["stash"]] and again.uploaded == [[str(tmp_path / "work" / f"{first['ran']['run_id']}-restore.tar"), "/content/restore.tar"]]
+    assert second["ran"]["status"] == "ok" and any("resuming" in n for n in notes)
+
+
+def test_no_session_without_the_units_for_one(tmp_path):
+    cli = FakeCLI(tmp_path, balance=10.0)  # under 1.5 h of A100
+    out, notes, _ = run(tmp_path, cli)
+    assert out == {"ran": None, "more": False} and "new" not in cli.calls and "waiting" in notes[-1]
+
+
+def test_a_lost_session_is_still_stopped_and_recorded(tmp_path):
+    cli = FakeCLI(tmp_path)
+
+    def broken(cmd, timeout=None):
+        if cmd[1] == "exec" and "subprocess.Popen" in Path(cmd[cmd.index("-f") + 1]).read_text():
+            return 1, "[colab] Session 'x' appears to be lost (404/401). Cleaning up."
+        return cli(cmd, timeout)
+
+    out, _, state = run(tmp_path, broken)
+    assert out["ran"]["status"] == "failed" and "lost" in out["ran"]["error"] and cli.stopped
+
+
+def test_colab_runs_are_read_from_their_dataset(tmp_path):
+    class K:
+        def dataset_download(self, ref, dest):
+            (Path(dest) / "r").mkdir(parents=True)
+            (Path(dest) / "r" / "dev_probs.json").write_text('{"q": [1, 0, 0, 0]}')
+
+    run_ = {"run_id": "r", "backend": "colab", "kernel": "", "dataset": "first/reva-run-r"}
+    assert arena.load_probs(K(), run_, tmp_path, "dev_probs.json") == {"q": [1, 0, 0, 0]}
+
+
+def test_queue_rejects_a_backend_typo_and_gpus_on_kaggle(tmp_path):
+    for bad in ("- name: a-b\n  backend: colb\n", "- name: a-b\n  gpu: A100\n"):
+        (tmp_path / "q.yaml").write_text(bad)
+        with pytest.raises(ValueError):
+            remote.load_queue(tmp_path / "q.yaml")
+
+
+def test_usage_parses_the_cli_output():
+    assert colab.parse_usage("Current balance: 87.25 compute units\nUsage rate: 11.70/hr\n") == (87.25, 11.7)
+    with pytest.raises(colab.ColabError):
+        colab.parse_usage("Error: not logged in")
+
+
+def test_a_session_that_runs_out_mid_job_resumes_from_its_last_checkpoint(tmp_path):
+    """The job's own deadline should stop it first; if setup ran long, the session's end comes
+    first. Its periodic checkpoint is in the output, so the run is partial, not failed."""
+    cli = FakeCLI(tmp_path, finish="crashed", polls_until_done=10**6)
+    clock = iter(range(0, 10**9, 3600))  # every poll is an hour
+    out, _, _ = run_with(tmp_path, cli, clock=lambda: next(clock))
+    assert out["ran"]["status"] == "partial" and out["ran"]["resumable"] and "session ended" in out["ran"]["where"]
+
+
+def run_with(tmp_path, cli, **kw):
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    notes = []
+    out = colab.run_next(cfg(), QUEUE, state, tmp_path / "work", colab.Colab(runner=cli), FakeKaggle(), "abc",
+                         5.0, "2026-10-09T00:00:00Z", notes, poll_s=0, sleep=lambda s: None, **kw)
+    return out, notes, state
