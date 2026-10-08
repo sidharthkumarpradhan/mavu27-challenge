@@ -1,6 +1,6 @@
-# ReVA autopilot status (2026-10-08T05:26:47Z)
+# ReVA autopilot status (2026-10-08T05:47:04Z)
 
-- Codabench login ok; account may submit
+- Codabench login failed: login failed (500)
 - leaderboard: 7 rows, 0 new; leader mkhlystun 0.8795
 - job tubu9938/reva-ft-4b-16f-830869b1 is running
 
