@@ -1,10 +1,10 @@
 {
  "kernel": "tubu9938/reva-ft-4b-16f-830869b1",
- "pushed": "2026-10-07T23:36:33Z",
- "sha": "21d232996541bdfaffeb357f1c1abc86b707401f",
+ "pushed": "2026-10-08T10:51:55Z",
+ "sha": "f174f338481d1791a63bc064a43e88c66caea196",
  "runs": [
   "ft-4b-16f-830869b1",
-  "zs-8b-4bit-029fe922"
+  "ft-4b-32f-527078f0"
  ],
  "url": "https://www.kaggle.com/code/tubu9938/reva-ft-4b-16f-830869b1"
 }
