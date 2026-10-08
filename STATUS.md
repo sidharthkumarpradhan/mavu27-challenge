@@ -1,7 +1,7 @@
-# ReVA autopilot status (2026-10-08T04:20:01Z)
+# ReVA autopilot status (2026-10-08T04:32:28Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 7 rows, 0 new; leader mkhlystun 0.8795
+- leaderboard: 7 rows, 1 new; leader mkhlystun 0.8795
 - job tubu9938/reva-ft-4b-16f-830869b1 is running
 
 ## Leaderboard (top 8)
@@ -10,8 +10,8 @@
 |---|---|---|
 | 1 | mkhlystun | 0.8795 |
 | 2 | h | 0.8625 |
-| 3 | amirmazaheri | 0.8313 |
-| 4 | Vincente | 0.8257 |
+| 3 | Vincente | 0.8355 |
+| 4 | amirmazaheri | 0.8313 |
 | 5 | StagAI | 0.7177 |
 | 6 | Hoang Bui | 0.6793 |
 | 7 | chrisathy | 0.2515 |
