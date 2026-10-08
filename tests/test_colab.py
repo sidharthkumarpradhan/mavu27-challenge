@@ -201,3 +201,25 @@ def test_the_pending_check_the_autopilot_uses_to_start_sessions(tmp_path, capsys
     assert "ft-c-" in capsys.readouterr().out
     q.write_text("- name: ft-k\n  set: {train.enabled: true}\n")
     assert cli.main(["colab", "--pending", "--state", str(state), "--queue", str(q)]) == 1
+
+
+def test_the_token_check_names_what_is_wrong_without_printing_values(tmp_path):
+    """Regression (8 Oct 2026): the first session failed with only the CLI's login prompt, which
+    hides whether the stored token was malformed or refused."""
+    tok = tmp_path / "token.json"
+    good = {"token": "SECRET-A", "refresh_token": "SECRET-R", "client_id": "id", "client_secret": "SECRET-C",
+            "token_uri": "https://oauth2.googleapis.com/token"}
+
+    def refused(info):
+        raise RuntimeError("invalid_grant: Token has been expired or revoked.")
+
+    for text, refresh, why in [("not json", None, "not the JSON"),
+                               (json.dumps({"token": "SECRET-A"}), None, "lacks refresh_token, client_id, client_secret"),
+                               (json.dumps(good), refused, "invalid_grant")]:
+        tok.write_text(text)
+        with pytest.raises(colab.ColabError, match=why) as e:
+            colab.check_token(tok, refresh)
+        assert "SECRET" not in str(e.value)
+    tok.write_text(json.dumps(good))
+    ok = colab.check_token(tok, lambda info: None)
+    assert ok.startswith("Colab login ok") and "SECRET" not in ok

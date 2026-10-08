@@ -60,6 +60,7 @@ jobs:
           mkdir -p ~/.config/colab-cli
           printf %s "$COLAB_TOKEN" > ~/.config/colab-cli/token.json
           chmod 600 ~/.config/colab-cli/token.json
+          python -m reva.cli colab --check-token
 
       - name: Probe
         if: inputs.probe

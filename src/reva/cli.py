@@ -106,6 +106,9 @@ def cmd_colab(a) -> int:
         nxt = colab.next_lane(_cfg(a), remote.load_queue(a.queue), runs)
         print(f"Colab entry pending: {nxt[0]['run_id']} on {nxt[1]}" if nxt else "no Colab entry pending")
         return 0 if nxt else 1
+    if a.check_token:  # fails loudly with the reason the CLI would hide
+        print(colab.check_token())
+        return 0
     session = colab.Colab()
     if a.probe:
         print(colab.probe(session, a.gpu or "T4"))
@@ -213,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--gpu", default="", help="GPU for --probe")
     c.add_argument("--probe", action="store_true")
     c.add_argument("--pending", action="store_true", help="exit 0 if a Colab entry is pending, else 1")
+    c.add_argument("--check-token", action="store_true", help="check the stored login before a session")
     c.add_argument("--outcome")
     s = sub.add_parser("submit")
     s.add_argument("--run", required=True)
