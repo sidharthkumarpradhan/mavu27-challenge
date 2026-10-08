@@ -223,11 +223,13 @@ class VLM:
 
     # training
     def add_lora(self, tcfg: dict, init: str | Path | None = None) -> None:
-        from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        from peft import LoraConfig, PeftModel, get_peft_model
 
-        if self.cfg.get("load_4bit"):
-            self.model = prepare_model_for_kbit_training(self.model, use_gradient_checkpointing=True)
-        elif tcfg.get("grad_ckpt", True):
+        # 4-bit takes the same path as fp16. peft's prepare_model_for_kbit_training would upcast every
+        # unquantized weight (vision tower, lm_head, norms) to fp32: 3 to 4 GB more for the 8B on a
+        # 16 GB T4, and an fp32 residual stream and KV cache for the inference after training.
+        # get_peft_model freezes the base weights either way, and autocast covers the compute.
+        if tcfg.get("grad_ckpt", True):
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             self.model.enable_input_require_grads()
         if init:
