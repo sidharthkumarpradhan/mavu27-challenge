@@ -1,14 +1,11 @@
-# ReVA autopilot status (2026-10-08T10:51:55Z)
+# ReVA autopilot status (2026-10-08T11:12:42Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- job tubu9938/reva-ft-4b-16f-830869b1 complete; failed lanes: ['ft-4b-16f-830869b1'] 
-- collected ['ft-4b-16f-830869b1', 'zs-8b-4bit-029fe922']
-- arena: no average of the top runs beats zs-8b-4bit-029fe922 on dev
-- next candidate zs-8b-4bit-029fe922: dev weighted 0.7442 +/- 0.0150, projected board 0.7489 (1 calibration pair); leader 0.8795, below by 0.1306
-- submitted zs-8b-4bit-029fe922 as 969024 (fill_test): dev 0.7442 vs best submitted 0.7130; status Finished
+- leaderboard: 8 rows, 1 new; leader mkhlystun 0.8795
+- job tubu9938/reva-ft-4b-16f-830869b1 complete; failed lanes: ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0'] 
+- collected ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
 - Kaggle weekly GPU quota reached on account 1
-- pushed tubu9938/reva-ft-4b-16f-830869b1 with ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
+- pushed tubu9938/reva-ft-4b-32f-527078f0 with ['ft-4b-32f-527078f0', 'ft-q35-4b-16f-e4ba68c0']
 
 ## Leaderboard (top 8)
 
@@ -19,7 +16,7 @@
 | 3 | Vincente | 0.8355 |
 | 4 | amirmazaheri | 0.8313 |
 | 5 | am | 0.7768 |
-| 6 | StagAI | 0.7177 |
+| 6 | StagAI | 0.7410 |
 | 7 | Hoang Bui | 0.6793 |
 | 8 | chrisathy | 0.2515 |
 
@@ -51,6 +48,8 @@
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
+| ft-4b-32f-527078f0 | failed | nan | nan |  |  |
+| ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | ok | 0.7442 | 0.7354 | 10.889 | zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4 |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
@@ -59,5 +58,5 @@
 | zs-4b-6254e8de | ok | 0.7130 | 0.7020 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
 | text-4b-f571bdb5 | ok | 0.4773 | 0.4807 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
 
-Submissions used: 2 of 100. GPU hours, last 7 days: 19.0 of 30.
-Active job: tubu9938/reva-ft-4b-16f-830869b1 ['ft-4b-16f-830869b1', 'ft-4b-32f-527078f0']
+Submissions used: 2 of 100. GPU hours, last 7 days: 19.4 of 30.
+Active job: tubu9938/reva-ft-4b-32f-527078f0 ['ft-4b-32f-527078f0', 'ft-q35-4b-16f-e4ba68c0']
