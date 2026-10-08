@@ -1,6 +1,6 @@
-# ReVA autopilot status (2026-10-08T15:21:31Z)
+# ReVA autopilot status (2026-10-08T15:41:44Z)
 
-- Codabench login failed: can_make_submission failed (500)
+- Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
 - job tubu9938/reva-ft-q35-4b-16f-e4ba68c0 is running
 
