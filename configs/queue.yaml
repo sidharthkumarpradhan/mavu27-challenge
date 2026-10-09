@@ -73,3 +73,13 @@
   gpu: A100
   set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.dtype: bf16, train.enabled: true, frames.n: 32, infer.perms: 4,
         train.span_sessions: true}
+# Next Colab entry (9 Oct 2026). ft-8b-32f-a100 scored 0.821 weighted on dev, +0.0035 over the
+# submitted 8B; the leader is 6.7 points above our board score, more than frames or epochs have
+# moved us. Model scale is the lever left. Probe before spending the units on a fine-tune: the
+# 32B zero-shot under the same setup as zs-8b-4bit (16 frames, no option shifts), which scored
+# 0.744. About 2-3 A100 hours. If it beats zs-8b-4bit by a wide margin, a 32B QLoRA comes next.
+- name: zs-32b-4bit-a100
+  why: zero-shot Qwen3-VL-32B in 4-bit on a Colab A100, set up like zs-8b-4bit. A ceiling probe before a 32B fine-tune
+  backend: colab
+  gpu: A100
+  set: {model.id: Qwen/Qwen3-VL-32B-Instruct, model.load_4bit: true, model.dtype: bf16}
