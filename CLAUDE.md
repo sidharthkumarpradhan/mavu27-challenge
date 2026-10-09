@@ -98,6 +98,9 @@ From the Codabench pages (read in full 6 Oct 2026):
   run's weighted dev accuracy beats the best submitted run by `submit.min_gain`, no submission is
   still being scored, the daily cap and the budget reserve leave room. Kill switches are repo
   variables: `AUTO_SUBMIT=off` stops submissions, `AUTOPILOT=off` stops the loop.
+- A submission still Running 3 h after upload is marked Stalled (Codabench's limit is 600 s; 971508
+  sat for hours on 9 Oct 2026). It stops holding back the next submission and its own resubmission,
+  still counts against the budget, and is still polled so a late score is recorded.
 - The predictions.json layout is probed automatically: if Codabench fails one layout, the next
   cycle tries the next (Failed submissions are free). A layout that scored once is kept.
 - `train.refit_with_val` stays false. Agent's call under the owner's "handle everything", made for

@@ -209,15 +209,28 @@ def pick_format(subs: list[dict], cfg: dict) -> str | None:
     return next((f for f in [first, *[f for f in package.FORMATS if f != first]] if f not in failed), None)
 
 
+# Codabench's limit is 600 s of execution, yet submission 971508 stayed Running for hours (9 Oct
+# 2026). A submission still Running this long after upload is marked Stalled: it no longer blocks
+# the gate or the candidate's resubmission, and its dev score no longer sets the bar. It still
+# counts against the budget and is still polled, so a late result is recorded.
+STALL_HOURS = 3
+STALLED = "Stalled"
+GIVEN_UP = FAILED | {STALLED}
+
+
+def stalled(s: dict, status: str | None, now: dt.datetime) -> bool:
+    return status not in DONE | FAILED and now - parse_iso(s["submitted"]) > dt.timedelta(hours=STALL_HOURS)
+
+
 def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool, str]:
     """Should this run be submitted now? Pure function of the state, so it is unit-tested."""
     if run.get("status") != "ok" or not run.get("zip"):
         return False, "no validated zip"
     if run.get("n", {}).get("test") != 4000:
         return False, "not a full test run"
-    if any(s["run_id"] == run["run_id"] and s["status"] not in FAILED for s in subs):
+    if any(s["run_id"] == run["run_id"] and s["status"] not in GIVEN_UP for s in subs):
         return False, "already submitted"
-    if any(s["status"] not in DONE | FAILED for s in subs):
+    if any(s["status"] not in DONE | GIVEN_UP for s in subs):
         return False, "a submission is still being scored"
     if pick_format(subs, cfg) is None:
         return False, "Codabench failed every predictions.json layout; the scorer needs a code fix"
@@ -230,7 +243,8 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
     if left <= 0 or ((deadline - now).days > 7 and left <= C.get(cfg, "submit.reserve")):
         return False, f"submission budget: {left} left, reserve {C.get(cfg, 'submit.reserve')}"
     mine = run["metrics"]["weighted_accuracy"]
-    best = max((s["dev_weighted"] for s in used if s.get("dev_weighted") is not None), default=None)
+    best = max((s["dev_weighted"] for s in used if s.get("dev_weighted") is not None and s["status"] != STALLED),
+               default=None)
     if best is not None and mine < best + C.get(cfg, "submit.min_gain"):
         return False, f"dev {mine:.4f} does not beat best submitted {best:.4f} by {C.get(cfg, 'submit.min_gain')}"
     return True, f"dev {mine:.4f}" + (f" vs best submitted {best:.4f}" if best is not None else " (first submission)")
@@ -239,7 +253,7 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
 def candidate(runs: list[dict], subs: list[dict], blocked: set[str] = frozenset()) -> dict | None:
     """Best finished full-test run by weighted dev accuracy that has no live submission yet and
     was not stopped by the pre-upload checks. A run without a fair dev score is never picked."""
-    taken = {s["run_id"] for s in subs if s["status"] not in FAILED} | set(blocked)
+    taken = {s["run_id"] for s in subs if s["status"] not in GIVEN_UP} | set(blocked)
     ok = [r for r in runs if r["status"] == "ok" and r.get("zip") and r["run_id"] not in taken
           and "weighted_accuracy" in (r.get("metrics") or {})]
     return max(ok, key=lambda r: r["metrics"]["weighted_accuracy"], default=None)
@@ -460,8 +474,12 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
                 except CodabenchError as e:
                     notes.append(f"could not poll submission {s['submission_id']}: {public(e)}")
                     continue
-                if rec.get("status") != s["status"]:
-                    registry.append(state / "submissions.jsonl", {**s, "status": rec.get("status"), "scores": scores(rec)})
+                status = STALLED if stalled(s, rec.get("status"), now) else rec.get("status")
+                if status != s["status"]:
+                    registry.append(state / "submissions.jsonl", {**s, "status": status, "scores": scores(rec)})
+                    if status == STALLED:
+                        notes.append(f"submission {s['submission_id']} ({s['run_id']}) still {rec.get('status')} after "
+                                     f"{STALL_HOURS} h; it no longer holds back the next submission")
         subs = latest_submissions(registry.read(state / "submissions.jsonl"))
 
     # 3. collect a finished job
