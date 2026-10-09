@@ -406,3 +406,24 @@ def test_a_part_that_keeps_failing_fails_the_session_loudly(tmp_path):
     with pytest.raises(colab.ColabError, match="Upload failed"):
         colab.upload_parts(colab.Colab(runner=FlakyUpload(fails=3)), "s", tar, "/content/restore.tar", part_bytes=60)
     assert not list(tmp_path.glob("*.part*"))
+
+
+def test_failed_colab_setups_do_not_use_up_the_runs_retries():
+    # regression: two sessions died uploading ft-8b-32f-a100's checkpoint (9 Oct 2026); the run
+    # dropped out of the queue although it was at step 1639 of 1686
+    run_id = remote.run_config(cfg(), QUEUE[1])["run_id"]
+    lost = {"run_id": run_id, "status": "failed", "backend": "colab",
+            "error": "\n`colab upload` exited 1: [colab] Upload failed: SSLEOFError"}
+    runs = [{"run_id": run_id, "status": "partial", "resumable": True, "stash": "first/reva-run-x"}, lost, lost]
+    lane, gpu = colab.next_lane(cfg(), QUEUE, runs)
+    assert lane["run_id"] == run_id and gpu == "A100"
+    # a broken backend still cannot loop forever
+    assert colab.next_lane(cfg(), QUEUE, runs[:1] + [lost] * 6) is None
+
+
+def test_colab_errors_never_carry_the_runtime_proxy_token():
+    out = ("[colab] Upload failed: Max retries exceeded with url: /api/contents/content/restore.tar"
+           "?authuser=0&colab-runtime-proxy-token=eyJhbGciOi.secret.sig (Caused by SSLError)")
+    with pytest.raises(colab.ColabError) as e:
+        colab.Colab(runner=lambda cmd, timeout=None: (1, out)).upload("s", Path("x"), "/content/x")
+    assert "eyJ" not in str(e.value) and "colab-runtime-proxy-token=***" in str(e.value)

@@ -69,6 +69,11 @@ def parse_usage(text: str) -> tuple[float, float]:
     return float(bal.group(1)), float(rate.group(1)) if rate else 0.0
 
 
+def redact(text: str) -> str:
+    """Drop the runtime's proxy token from a CLI error: the run rows that keep the error are public."""
+    return re.sub(r"(token=)[^&\s'\"]+", r"\1***", text)
+
+
 class Colab:
     """The CLI calls the backend needs. Each one fails loudly on a non-zero exit."""
 
@@ -79,7 +84,7 @@ class Colab:
     def _run(self, *args: str, timeout: float | None = None) -> str:
         code, out = self.runner([*self.cli, *args], timeout)
         if code != 0:
-            raise ColabError(f"`colab {args[0]}` exited {code}: {out.strip()[-800:]}")
+            raise ColabError(f"`colab {args[0]}` exited {code}: {redact(out.strip()[-800:])}")
         return out
 
     def usage(self) -> tuple[float, float]:
