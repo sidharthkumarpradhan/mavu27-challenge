@@ -1,11 +1,11 @@
 {
- "run_id": "ft-8b-32f-a100-20321a8a",
+ "run_id": "zs-32b-4bit-a100-127cb717",
  "gpu": "A100",
- "started": "2026-10-09T05:54:06Z",
- "units_before": 86.45,
- "updated": "2026-10-09T07:27:40Z",
+ "started": "2026-10-09T07:45:31Z",
+ "units_before": 78.42,
+ "updated": "2026-10-09T07:49:38Z",
  "stage": "done",
- "status": "ok",
- "hours_in": 1.55,
+ "status": "failed",
+ "hours_in": 0.07,
  "units_after": 78.42
 }
