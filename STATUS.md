@@ -1,9 +1,9 @@
-# ReVA autopilot status (2026-10-09T18:25:24Z)
+# ReVA autopilot status (2026-10-09T18:46:00Z)
 
 - Codabench login ok; account may submit
-- leaderboard fetch failed: 500 Server Error: Internal Server Error for url: https://www.codabench.org/api/phases/30831/get_leaderboard/
-- Colab: ft-32b-4bit-a100-5f522e72 on A100, 2.1 h in at 2026-10-09T18:04:16Z, 51.23 units at start; last log line: -
-- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs)
+- leaderboard: 9 rows, 0 new; leader mkhlystun 0.8802
+- Colab: ft-32b-4bit-a100-5f522e72 on A100, 2.5 h in at 2026-10-09T18:28:56Z, 51.23 units at start; last log line: -
+- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.8802, below by 0.0585
 - not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 - Kaggle weekly GPU quota reached on account 1
@@ -14,6 +14,38 @@
 
 | # | owner | overall |
 |---|---|---|
+| 1 | mkhlystun | 0.8802 |
+| 2 | h | 0.8638 |
+| 3 | T.H | 0.8438 |
+| 4 | am | 0.8400 |
+| 5 | Vincente | 0.8355 |
+| 6 | amirmazaheri | 0.8313 |
+| 7 | StagAI | 0.8297 |
+| 8 | Hoang Bui | 0.6793 |
+
+## Gap to the leader (best submission ens-79d0d049)
+
+| task | leader | ours | overall points lost |
+|---|---|---|---|
+| Temporal Grounding | 0.834 | 0.742 | 1.48 |
+| Perspective and Viewpoint | 0.894 | 0.819 | 0.90 |
+| Object and Land Cover Recognition | 0.877 | 0.833 | 0.73 |
+| Change Detection | 0.826 | 0.774 | 0.65 |
+| Trend and Pattern | 0.883 | 0.825 | 0.52 |
+| Geometric Relation | 0.897 | 0.853 | 0.45 |
+| Structural Layout | 0.879 | 0.856 | 0.20 |
+| Consequence Reasoning | 0.980 | 0.950 | 0.08 |
+| General Understanding | 0.989 | 0.983 | 0.03 |
+| Causation Reasoning | 0.950 | 0.944 | 0.03 |
+| Hypothetical Reasoning | 0.894 | 0.894 | 0.00 |
+
+## Calibration (board minus local weighted dev, dev set unseen-v1)
+
+| run | dev weighted | board | diff |
+|---|---|---|---|
+| zs-4b-6254e8de | 0.7159 | 0.7177 | +0.0018 |
+| ft-8b-4bit-16f-62f77933 | 0.8130 | 0.8125 | -0.0005 |
+| ens-79d0d049 | 0.8288 | 0.8297 | +0.0009 |
 
 ## Runs (newest first)
 
