@@ -1,2 +1,3 @@
 {"gpu": "A100", "hours": 3.86, "rate": 5.21, "run_id": "ft-8b-32f-a100-20321a8a", "started": "2026-10-08T23:22:39Z", "status": "partial", "units_after": 86.45, "units_before": 106.56}
 {"gpu": "A100", "hours": 0.0, "rate": null, "run_id": "ft-8b-32f-a100-20321a8a", "started": "2026-10-09T04:07:30Z", "status": "failed", "units_after": 86.45, "units_before": 86.45}
+{"gpu": "A100", "hours": 0.0, "rate": null, "run_id": "ft-8b-32f-a100-20321a8a", "started": "2026-10-09T04:08:18Z", "status": "failed", "units_after": 86.45, "units_before": 86.45}
