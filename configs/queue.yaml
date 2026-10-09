@@ -83,3 +83,13 @@
   backend: colab
   gpu: A100
   set: {model.id: Qwen/Qwen3-VL-32B-Instruct, model.load_4bit: true, model.dtype: bf16}
+# zs-32b-4bit-a100 scored 0.768 weighted dev against 0.744 for zs-8b-4bit under the same setup
+# (9 Oct 2026), so scale pays. Fine-tuning moved the 8B from 0.744 to 0.821; the same on the 32B is
+# the run that can close the gap to the leader. 16 frames to keep a full epoch within the
+# remaining units; the final session the units allow stops training in time to predict.
+- name: ft-32b-4bit-a100
+  why: QLoRA of Qwen3-VL-32B on a Colab A100, 16 frames, a full epoch across sessions. Its zero-shot beat the 8B's by 2.4 points
+  backend: colab
+  gpu: A100
+  set: {model.id: Qwen/Qwen3-VL-32B-Instruct, model.load_4bit: true, model.dtype: bf16, train.enabled: true, infer.perms: 4,
+        train.span_sessions: true}
