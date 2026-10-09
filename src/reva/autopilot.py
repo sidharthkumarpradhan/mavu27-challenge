@@ -86,7 +86,9 @@ def no_internet(run: dict) -> bool:
 
 # A broken environment, not the experiment: the Kaggle image shipped torchao 0.10.0 on 8 Oct 2026,
 # and peft 0.21.2 refuses to add LoRA next to an older torchao.
-ENV_ERRORS = NO_INTERNET + ("Found an incompatible version of",)
+# A Colab CLI call that failed ("`colab upload` exited 1: ...", reva.colab.Colab) is Colab's fault:
+# both sessions that tried to resume ft-8b-32f-a100 on 9 Oct 2026 died uploading the checkpoint.
+ENV_ERRORS = NO_INTERNET + ("Found an incompatible version of", "`colab ")
 ENV_FREE_TRIES = 3  # environment failures start to count after this many, so a bad fix cannot loop
 
 
