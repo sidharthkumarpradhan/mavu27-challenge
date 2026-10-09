@@ -1,6 +1,6 @@
-# ReVA autopilot status (2026-10-09T11:41:33Z)
+# ReVA autopilot status (2026-10-09T11:51:32Z)
 
-- Codabench login ok; account may submit
+- Codabench login failed: login failed (500)
 - leaderboard: 9 rows, 0 new; leader mkhlystun 0.8795
 - next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8216 (2 calibration pairs); leader 0.8795, below by 0.0579
 - not submitting ft-8b-32f-a100-20321a8a: a submission is still being scored
