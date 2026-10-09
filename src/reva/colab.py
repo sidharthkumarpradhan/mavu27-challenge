@@ -10,6 +10,8 @@ One GitHub Actions job holds one Colab session from start to end (.github/workfl
 Colab Pro has no background execution, so a session lives only while this job holds it, and an
 Actions job lasts at most 6 h. A run that needs longer spans sessions (train.span_sessions) the
 same way it does on Kaggle: it checkpoints at its session's end and the next session resumes it.
+While the job runs, its folder is also saved every hour (snapshot_code), so a session that is
+lost midway (the VM drops, the units run out) resumes from the last hour, not from its start.
 
 Login: the owner ran the CLI's copy-paste OAuth flow once and stored the token it saved as the
 COLAB_TOKEN secret; the workflow writes it to ~/.config/colab-cli/token.json and the CLI refreshes
@@ -107,10 +109,14 @@ class Colab:
         self._run("stop", "-s", name, timeout=300)
 
 
-def lane_config(base: dict, lane: dict, hours: float) -> dict:
+def lane_config(base: dict, lane: dict, hours: float, final: bool = False) -> dict:
     """The run's config for a Colab session of `hours`: Colab paths, and the job budget the
-    session leaves after setup. The run id does not change."""
-    return C.override(lane, {**PATHS, "job.max_hours": round(min(C.get(lane, "job.max_hours"), hours - SETUP_H), 2)})
+    session leaves after setup. In the `final` session the units allow, a run that spans sessions
+    stops training in time to predict (train.final_session). The run id does not change."""
+    over = {**PATHS, "job.max_hours": round(min(C.get(lane, "job.max_hours"), hours - SETUP_H), 2)}
+    if final and C.get(lane, "train.span_sessions", False):
+        over["train.final_session"] = True
+    return C.override(lane, over)
 
 
 def start_code(cfg: dict, sha: str, repo: str, pip: list[str]) -> str:
@@ -158,6 +164,38 @@ print("TARRED")
 '''
 
 
+def snapshot_code(run_id: str) -> str:
+    """Tar a consistent copy of the running job's folder. A hard-link copy is instant and keeps
+    the files as they were: a checkpoint save writes new files and renames folders, never edits
+    one in place. Retried when a save swapped folders mid-copy. Nothing is sent before the job
+    has a whole checkpoint, or has finished training."""
+    return f'''import os, shutil, subprocess, time
+d, snap = {OUT + "/" + run_id!r}, "/content/snap"
+s = os.path.join(snap, {run_id!r})
+def whole():
+    return os.path.exists(os.path.join(s, "train.json")) or any(
+        os.path.isfile(os.path.join(s, c, "state.pt")) and os.path.isdir(os.path.join(s, c, "adapter"))
+        for c in ("ckpt", "ckpt.old"))
+ok = False
+for _ in range(3):
+    shutil.rmtree(snap, ignore_errors=True)
+    os.makedirs(snap)
+    if subprocess.run(["cp", "-al", d, snap + "/"]).returncode != 0:
+        subprocess.run(["cp", "-a", d, snap + "/"])
+    if whole():
+        ok = True
+        break
+    time.sleep(10)
+if ok:
+    shutil.rmtree(os.path.join(s, "ckpt.tmp"), ignore_errors=True)
+    # exit 1 only means a file such as the log grew while it was read
+    if subprocess.run(["tar", "-cf", "/content/snap.tar", "-C", snap, {run_id!r}]).returncode > 1:
+        ok = False
+shutil.rmtree(snap, ignore_errors=True)
+print("SNAPPED" if ok else "NOTHING TO SAVE YET")
+'''
+
+
 def restore_code(run_id: str) -> str:
     return f'''import os, tarfile
 os.makedirs({OUT!r}, exist_ok=True)
@@ -167,6 +205,9 @@ print("RESTORED", sorted(os.listdir({OUT + "/" + run_id!r})))
 '''
 
 
+LOST_AFTER = 3  # failed polls in a row (15 minutes) that mean the session is gone
+
+
 def exit_code(poll: str) -> int | None:
     m = re.search(r"EXIT_CODE (\S+)", poll)
     return int(m.group(1)) if m and m.group(1).lstrip("-").isdigit() else None
@@ -174,9 +215,13 @@ def exit_code(poll: str) -> int | None:
 
 def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: str, hours: float, work: Path,
             restore: Path | None = None, poll_s: float = 300, sleep=time.sleep, clock=time.time,
-            log=print, progress: Callable[..., None] | None = None) -> tuple[Path | None, str, float, bool]:
+            log=print, progress: Callable[..., None] | None = None, save: Callable[[Path], None] | None = None,
+            save_every_s: float = 3600) -> tuple[Path | None, str, float, bool]:
     """Run one lane in one Colab session. Returns (the downloaded output folder or None, the last
-    log tail, wall hours, whether the job ended by itself). The session is always stopped."""
+    log tail, wall hours, whether the job ended by itself). The session is always stopped.
+
+    Every `save_every_s` while the job runs, a snapshot of its folder is downloaded and handed to
+    `save` (run_next archives it). A failed snapshot only warns: the job keeps running."""
     run_id, t0 = cfg["run_id"], clock()
     name = f"reva-{run_id}"[:40]
     report = progress or (lambda **kw: None)
@@ -189,12 +234,17 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
         log(colab.exec(name, start_code(cfg, sha, repo, pip), timeout=120).strip())
         report(stage="started", hours_in=(clock() - t0) / 3600, last="")
         end = t0 + 3600 * hours - 1200  # leave 20 minutes to download and archive
+        saved_at, misses = clock(), 0
         while True:
             sleep(poll_s)
             try:
                 tail = colab.exec(name, poll_code(run_id), timeout=120)
-            except ColabError as e:  # one failed read is not a lost session; the next poll decides
+                misses = 0
+            except ColabError as e:  # one failed read is not a lost session; three in a row are
                 log(f"poll failed: {e}")
+                misses += 1
+                if misses >= LOST_AFTER or clock() > end:
+                    raise
                 continue
             last = tail.strip().splitlines()[-2] if len(tail.strip().splitlines()) > 1 else "(no log yet)"
             log(last)
@@ -202,6 +252,9 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
             report(stage="ended" if ended else "running", hours_in=(clock() - t0) / 3600, last=last)
             if ended or clock() > end:
                 break
+            if save and clock() - saved_at >= save_every_s:
+                saved_at = clock()
+                snapshot(colab, name, run_id, work, save, log)
         colab.exec(name, tar_code(run_id), timeout=1200)
         local = work / "colab" / f"{run_id}.tar"
         colab.download(name, "/content/out.tar", local)
@@ -217,6 +270,24 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
             colab.stop(name)
         except ColabError as e:  # an unstopped session burns units: say so loudly
             log(f"WARNING could not stop {name}: {e}")
+
+
+def snapshot(colab: Colab, name: str, run_id: str, work: Path, save: Callable[[Path], None], log=print) -> bool:
+    """Download a snapshot of the running job's folder and hand it to `save`. Never raises."""
+    try:
+        if "SNAPPED" not in colab.exec(name, snapshot_code(run_id), timeout=1200):
+            return False
+        local, folder = work / "colab" / f"{run_id}.snap.tar", work / "colab" / "snap"
+        colab.download(name, "/content/snap.tar", local)
+        shutil.rmtree(folder, ignore_errors=True)
+        with tarfile.open(local) as t:
+            t.extractall(folder, filter="data")
+        save(folder / run_id)
+        log(f"saved a snapshot of {run_id}")
+        return True
+    except Exception as e:  # the job is still running; the next snapshot or the session's end saves it
+        log(f"WARNING snapshot of {run_id} failed: {type(e).__name__}")
+        return False
 
 
 # Units per hour by GPU before a session has measured its own rate (`colab usage` reads it after
@@ -279,7 +350,9 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
             t.add(copy / lane["run_id"], arcname=lane["run_id"])
         notes.append(f"Colab: resuming {lane['run_id']} from {saved[-1]}")
 
-    cfg = lane_config(base, lane, hours)
+    # units left after this session buy no other one: train only as long as prediction allows
+    final = (balance - hours * rate) / rate - 0.25 < MIN_HOURS
+    cfg = lane_config(base, lane, hours, final)
 
     def live(**kw):  # what the session is doing, for STATUS readers while it runs
         (state / "colab_live.json").write_text(json.dumps({
@@ -288,8 +361,17 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
         if publish:
             publish()
 
+    ref = autopilot.stash_ref(kaggle.users[0] if hasattr(kaggle, "users") else "me", lane["run_id"])
+    snaps: list[str] = []
+
+    def save(run_dir: Path) -> None:  # an hourly snapshot, a new version of the run's dataset
+        autopilot.stash(kaggle, run_dir, ref, work / "snap", message=f"colab {gpu} snapshot", keep_test=True)
+        snaps.append(time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime()))
+
     session_kw.setdefault("progress", live)
-    notes.append(f"Colab: {lane['run_id']} on {gpu} for up to {hours:.1f} h ({balance:.1f} units, about {rate:.1f}/h)")
+    session_kw.setdefault("save", save)
+    notes.append(f"Colab: {lane['run_id']} on {gpu} for up to {hours:.1f} h ({balance:.1f} units, about {rate:.1f}/h)"
+                 + ("; the last session the units allow, so it predicts" if C.get(cfg, "train.final_session", False) else ""))
     out_dir, log_tail, wall, ended = session(colab, cfg, sha, C.get(base, "remote.repo"), C.get(base, "remote.pip"), gpu,
                                       hours, work, restore, **session_kw)
     after, measured = colab.usage()
@@ -301,13 +383,17 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
         # the session ran out before the job could stop itself; its last checkpoint carries on
         row.update(status="partial", where="the Colab session ended before the job")
     if out_dir:
-        ref = autopilot.stash_ref(kaggle.users[0] if hasattr(kaggle, "users") else "me", lane["run_id"])
         try:
             autopilot.stash(kaggle, out_dir, ref, work, message=f"colab {gpu} {row['status']}", keep_test=True)
             row.update(stash=ref, dataset=ref)
             notes.append(f"Colab: saved {lane['run_id']} ({row['status']}) to private dataset {ref}")
         except Exception as e:  # the row still records what happened
             notes.append(f"Colab: could not save {lane['run_id']}: {autopilot.public(e)}")
+    if snaps and row["status"] != "ok" and "stash" not in row:
+        # lost midway, or the final archive failed: the newest snapshot carries the run on
+        row.update(status="partial", resumable=True, stash=ref, dataset=ref,
+                   where=f"the Colab session was lost; resumes from the snapshot of {snaps[-1]}")
+        notes.append(f"Colab: {lane['run_id']} resumes from the snapshot of {snaps[-1]}")
     used = max(0.0, balance - after)
     registry.append(state / "colab_runs.jsonl", row)
     registry.append(state / "colab_jobs.jsonl", {

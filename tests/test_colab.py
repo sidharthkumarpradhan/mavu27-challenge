@@ -285,3 +285,76 @@ def test_status_shows_the_colab_session_in_progress(tmp_path):
     assert "ft-c-1 on A100, 1.2 h in" in note and "loss 0.41" in note
     (tmp_path / "colab_live.json").write_text(json.dumps({"stage": "done"}))
     assert autopilot.colab_note(tmp_path) is None
+
+
+SPAN_QUEUE = [{"name": "ft-s", "backend": "colab", "gpu": "A100",
+               "set": {"train.enabled": True, "model.dtype": "bf16", "train.span_sessions": True}}]
+
+
+def test_the_last_session_the_units_pay_for_predicts_instead_of_only_training(tmp_path):
+    def started(balance):
+        home = tmp_path / str(int(balance))
+        (home / "state").mkdir(parents=True)
+        cli = FakeCLI(home, balance=balance)
+        notes = []
+        colab.run_next(cfg(), SPAN_QUEUE, home / "state", home / "work",
+                       colab.Colab(runner=cli), FakeKaggle(), "abc", 5.0, "2026-10-09T00:00:00Z", notes,
+                       poll_s=0, sleep=lambda s: None)
+        return cli.started, notes
+
+    last, notes = started(40.0)  # 2.8 h of A100 now, nothing after it
+    assert C.get(last, "train.final_session") is True and any("predicts" in n for n in notes)
+    more, _ = started(200.0)  # 5 h now and more sessions after it
+    assert not C.get(more, "train.final_session", False)
+    assert not C.get(colab.lane_config(cfg(), {**cfg(), "run_id": "r"}, 3.0, final=True), "train.final_session", False)
+
+
+def test_a_session_lost_midway_resumes_from_its_hourly_snapshot(tmp_path):
+    cli, k = FakeCLI(tmp_path, polls_until_done=10**6), FakeKaggle()
+    snapped = []
+
+    def runner(cmd, timeout=None):
+        args = cmd[1:]
+        code = Path(args[args.index("-f") + 1]).read_text() if args[0] == "exec" else ""
+        if '"cp", "-al"' in code:
+            snapped.append(True)
+            return 0, "SNAPPED"
+        if "EXIT_CODE" in code and snapped:
+            return 1, "[colab] Session appears to be lost (404/401)."
+        if args[0] == "download" and args[3] == "/content/snap.tar":
+            d = tmp_path / "vm-snap" / cli.started["run_id"]
+            (d / "ckpt" / "adapter").mkdir(parents=True)
+            (d / "ckpt" / "state.pt").write_bytes(b"x")
+            with tarfile.open(args[4], "w") as t:
+                t.add(d, arcname=d.name)
+            return 0, ""
+        return cli(cmd, timeout)
+
+    clock = iter(range(0, 10**9, 1200))  # 20 minutes pass between clock reads
+    state = tmp_path / "state"
+    state.mkdir()
+    notes = []
+    out = colab.run_next(cfg(), QUEUE, state, tmp_path / "work", colab.Colab(runner=runner), k, "abc", 5.0,
+                         "2026-10-09T00:00:00Z", notes, poll_s=0, sleep=lambda s: None, clock=lambda: next(clock))
+    row = out["ran"]
+    assert snapped and cli.stopped and row["status"] == "partial" and row["resumable"]
+    assert row["stash"] in k.datasets and f"{row['run_id']}/ckpt/state.pt" in k.datasets[row["stash"]]
+    assert "snapshot" in row["where"] and any("resumes from the snapshot" in n for n in notes)
+    assert autopilot.failures([row]) == {row["run_id"]: 0}  # a lost session is not held against the run
+
+
+def test_a_failed_snapshot_never_stops_the_session(tmp_path):
+    cli = FakeCLI(tmp_path)
+
+    def runner(cmd, timeout=None):
+        if cmd[1] == "exec" and '"cp", "-al"' in Path(cmd[cmd.index("-f") + 1]).read_text():
+            return 1, "boom"
+        return cli(cmd, timeout)
+
+    lines = []
+    assert not colab.snapshot(colab.Colab(runner=runner), "s", "r", tmp_path, lambda d: None, log=lines.append)
+    assert "snapshot of r failed" in lines[-1]
+
+
+def test_the_snapshot_code_parses():
+    compile(colab.snapshot_code("ft-x-1"), "snap", "exec")

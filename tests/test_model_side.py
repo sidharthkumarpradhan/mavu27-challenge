@@ -285,6 +285,32 @@ def test_a_spanning_run_trains_to_the_session_end_and_finishes_in_the_next(tmp_p
     assert (tmp_path / "adapter" / "adapter_config.json").exists()
 
 
+def test_the_final_session_shrinks_training_so_prediction_fits(tmp_path, monkeypatch):
+    """train.final_session: the last session the Colab units pay for resumes training without
+    stop_at, so it stops by the deadline and writes the adapter instead of waiting for a next
+    session that will not come."""
+    pytest.importorskip("torch")
+    from types import SimpleNamespace
+
+    from reva import model
+    from reva.model import find_checkpoint, train
+
+    rows, video_of = _tiny_training_set()
+    clock = [1000.0]
+    monkeypatch.setattr(model, "time", SimpleNamespace(time=lambda: clock[0]))
+
+    def slow(r):
+        clock[0] += 10
+        return video_of(r)
+
+    tcfg = {"grad_accum": 4, "pack": 2, "calib_samples": 4}
+    train(_fresh_lora(), rows, slow, tcfg, tmp_path, deadline=999.0, stop_at=1035.0)
+    ckpt = find_checkpoint(tmp_path)
+    last = train(_fresh_lora(ckpt / "adapter"), rows, slow, tcfg, tmp_path, deadline=clock[0] + 30, resume=ckpt)
+    assert last["stopped"] != "session" and last["sessions"] == 2
+    assert (tmp_path / "adapter" / "adapter_config.json").exists()
+
+
 def test_a_half_written_checkpoint_falls_back_to_the_last_whole_one(tmp_path):
     pytest.importorskip("torch")
     from reva.model import find_checkpoint
