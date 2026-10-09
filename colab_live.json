@@ -1,11 +1,10 @@
 {
- "run_id": "zs-32b-4bit-a100-127cb717",
+ "run_id": "ft-32b-4bit-a100-5f522e72",
  "gpu": "A100",
- "started": "2026-10-09T07:50:13Z",
- "units_before": 78.42,
- "updated": "2026-10-09T08:58:10Z",
- "stage": "done",
- "status": "ok",
- "hours_in": 1.12,
- "units_after": 72.67
+ "started": "2026-10-09T11:52:27Z",
+ "units_before": 72.67,
+ "updated": "2026-10-09T11:52:35Z",
+ "stage": "started",
+ "hours_in": 0.0018724501132965088,
+ "last": ""
 }
