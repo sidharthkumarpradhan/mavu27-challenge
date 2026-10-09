@@ -58,6 +58,10 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
   is still handled in a follow-up PR. Anything that touches compliance is the owner's call.
 - Compliance before score. Evidence over intuition. Every number has a source and a date.
 - Measure before building. Find the largest (test weight x gap to leader) and work only that.
+- Error analysis before every new experiment (owner, 9 Oct 2026: "the bounding principle is follow
+  the best practices"). Run `python -m reva.cli analyze --probs <run>=<dev_probs.json>` on the best
+  runs, and pick the next experiment from the cell with the most test points lost. Write the finding
+  and why the experiment should fix it in the queue entry's comment. No GPU run starts on a hunch.
 - Ceilings before architecture. Run an oracle or probe before a big build.
 - Simple first. Reproducible from the remote alone.
 
@@ -150,6 +154,11 @@ See `docs/research.md` for sources. Key ones:
   best model scores 80.04 on test. Change Detection and Temporal Grounding are weakest for all.
 - Paper (arXiv 2609.35507): Qwen2.5-VL-7B + LoRA r16 a32, lr 2e-4, 32 frames at 640x360.
   Text-only input scores 29.95, so the options alone give little away.
+- Temporal Grounding on Hawk_UAV is our largest loss (2.8 test points, dev 0.730 at 32 frames;
+  9 Oct 2026). Hawk_UAV clips are 8 s at 30 fps and the options sit 0.5 s apart ("At 3.5 seconds"
+  vs "At 4.0 seconds"). Qwen3-VL averages each pair of frames into one printed timestamp
+  (`Qwen3VLProcessor._calculate_timestamps`, transformers 5.19), so 16 frames give marks about 1.07 s
+  apart, 32 frames 0.53 s, 64 frames 0.27 s.
 - Videos: 1,139 mp4 files, 1.95 GB. Default backbone Qwen3-VL-4B-Instruct (fp16 fits a T4);
   8B needs 4-bit on a T4. A-D are single tokens; Qwen3-VL gets true frame timestamps.
 

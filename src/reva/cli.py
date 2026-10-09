@@ -44,6 +44,28 @@ def cmd_fetch(a) -> int:
     return 0
 
 
+def cmd_analyze(a) -> int:
+    """Where each run loses points on dev, weighted by the test mix (reva.analysis). Reads only
+    dev labels and the test set's task and source counts."""
+    import json
+
+    from reva import analysis, data
+
+    cfg = _cfg(a)
+    root = C.get(cfg, "data.root")
+    data.fetch_annotations(root, C.get(cfg, "data.hf_repo"))
+    sp = data.make_splits(root, C.get(cfg, "dev.holdout_frac"), C.get(cfg, "dev.seed"))
+    runs = {}
+    for item in a.probs:
+        name, _, path = item.partition("=")
+        runs[name] = json.loads(Path(path).read_text())
+    text = analysis.report(sp["dev"], runs, sp["test"])
+    if a.out:
+        Path(a.out).write_text(text)
+    print(text)
+    return 0
+
+
 def cmd_board(a) -> int:
     from reva import board
 
@@ -226,6 +248,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--work", default="work/submit")
     v = sub.add_parser("validate")
     v.add_argument("zip")
+    an = sub.add_parser("analyze", help="where runs lose points on dev, weighted by the test mix")
+    an.add_argument("--probs", action="append", required=True, metavar="NAME=DEV_PROBS_JSON")
+    an.add_argument("--out", default=None, help="also write the markdown report here")
     a = ap.parse_args(argv)
     if a.cmd == "smoke":
         from reva import smoke
@@ -236,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return job.main(["--config", a.job_config, "--out", a.out, "--device", a.device])
     return {"fetch": cmd_fetch, "board": cmd_board, "build": cmd_build, "autopilot": cmd_autopilot, "colab": cmd_colab,
-            "submit": cmd_submit, "validate": cmd_validate}[a.cmd](a)
+            "submit": cmd_submit, "validate": cmd_validate, "analyze": cmd_analyze}[a.cmd](a)
 
 
 if __name__ == "__main__":
