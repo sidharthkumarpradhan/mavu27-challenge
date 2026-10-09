@@ -83,6 +83,14 @@ These are the first things the first job will tell us. Check its log before trus
   `gh secret set COLAB_TOKEN < ~/.config/colab-cli/token.json`: the file has no trailing newline,
   so a terminal copy picks up the shell prompt and the JSON breaks (first two runs, 8 Oct).
   `reva.cli colab --check-token` names the problem without printing the token (#44).
+- Colab checkpoints leave the VM every hour, not only at the session's end: a snapshot of the
+  run folder becomes a new version of its private dataset `reva-run-<id>`. A session lost midway
+  (VM dropped, units ran out) is recorded as partial and the next one resumes from that snapshot.
+  Three failed polls in a row end a session. Drive is not used: mounting it needs a browser click
+  in every session, and the private dataset already serves resume.
+- When the units left after a session buy no other one, that session is the run's last
+  (`train.final_session`): training shrinks so dev and test prediction fit, and the run reaches
+  the board instead of stopping mid-epoch with no predictions.
 
 ## Next steps, in order
 

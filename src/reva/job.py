@@ -180,8 +180,10 @@ def run(cfg: dict, out: Path, device: str) -> dict:
         deadline = train_deadline(cfg, vlm, sp, video_of, perms, end, strict=not span)
         ckpt = find_checkpoint(out)
         vlm.add_lora(cfg["train"], ckpt / "adapter" if ckpt else C.get(cfg, "train.init_adapter"))
+        # the last session a run can pay for (train.final_session) shrinks training to fit prediction
+        final = C.get(cfg, "train.final_session", False)
         stats = train(vlm, sp["fit"], video_of, cfg["train"], out, deadline, seed=C.get(cfg, "train.seed", 0),
-                      stop_at=stop_at, resume=ckpt)
+                      stop_at=None if final else stop_at, resume=ckpt)
         if stats["stopped"] == "session":
             raise SessionOver(f"training: step {stats['steps']}, {stats['samples']} samples")
         write_json(out / "train.json", stats)
