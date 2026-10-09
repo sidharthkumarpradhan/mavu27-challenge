@@ -1,8 +1,8 @@
-# ReVA autopilot status (2026-10-09T15:40:15Z)
+# ReVA autopilot status (2026-10-09T16:00:46Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 9 rows, 0 new; leader mkhlystun 0.8802
-- Colab: ft-32b-4bit-a100-5f522e72 on A100, 3.8 h in at 2026-10-09T15:38:19Z, 72.67 units at start; last log line: -
+- leaderboard: 9 rows, 1 new; leader mkhlystun 0.8802
+- Colab: ft-32b-4bit-a100-5f522e72 on A100, 0.0 h in at 2026-10-09T15:58:58Z, 51.23 units at start; last log line: -
 - next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.8802, below by 0.0585
 - not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
@@ -15,7 +15,7 @@
 | # | owner | overall |
 |---|---|---|
 | 1 | mkhlystun | 0.8802 |
-| 2 | h | 0.8625 |
+| 2 | h | 0.8638 |
 | 3 | T.H | 0.8438 |
 | 4 | am | 0.8400 |
 | 5 | Vincente | 0.8355 |
@@ -51,6 +51,7 @@
 
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
+| ft-32b-4bit-a100-5f522e72 | partial | nan | nan |  |  |
 | ens-79d0d049 | ok | 0.8288 | 0.8249 | 0 | mean of top 2 on dev: ft-8b-32f-a100-20321a8a, ft-8b-4bit-16f-62f77933; P(beats ft-8b-32f-a100-20321a8a) 0.63 |
 | zs-32b-4bit-a100-127cb717 | ok | 0.7676 | 0.7634 | 0.953 | zero-shot Qwen3-VL-32B in 4-bit on a Colab A100, set up like zs-8b-4bit. A ceiling probe before a 32B fine-tune |
 | zs-32b-4bit-a100-127cb717 | failed | nan | nan |  |  |
@@ -70,7 +71,6 @@
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | ok | nan | nan | 10.889 | zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4 |
-| ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 
 Submissions used: 5 of 100. GPU hours, last 7 days: 35.7 of 30.
 Active job: none
