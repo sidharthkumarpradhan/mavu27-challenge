@@ -153,8 +153,9 @@ def test_a_lost_session_is_still_stopped_and_recorded(tmp_path):
 
 
 def test_colab_runs_are_read_from_their_dataset(tmp_path):
-    class K:
-        def dataset_download(self, ref, dest):
+    class K:  # only the one file: the whole dataset holds the adapter and checkpoint
+        def dataset_file(self, ref, path, dest):
+            assert (ref, path) == ("first/reva-run-r", "r/dev_probs.json")
             (Path(dest) / "r").mkdir(parents=True)
             (Path(dest) / "r" / "dev_probs.json").write_text('{"q": [1, 0, 0, 0]}')
 

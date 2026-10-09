@@ -49,8 +49,8 @@ def fetch(kaggle, run: dict, work: Path, name: str) -> Path:
     if run.get("backend") == "colab":
         dest = work / "datasets" / run["dataset"].replace("/", "--")
         path = dest / run["run_id"] / name
-        if not path.exists():
-            kaggle.dataset_download(run["dataset"], dest)
+        if not path.exists():  # the one file: the whole dataset holds the adapter and checkpoint
+            kaggle.dataset_file(run["dataset"], f"{run['run_id']}/{name}", dest)
         return path
     dest = work / run["kernel"].split("/")[-1]
     path = dest / run["run_id"] / name
