@@ -602,3 +602,28 @@ def test_older_runs_are_rescored_on_the_clean_dev_set_before_any_comparison(tmp_
     assert autopilot.candidate(runs, [sub_row("old", 0.99)]) is None  # "gone" is shown but never picked
     subs = autopilot.fair_subs([sub_row("gone", 0.98)], runs)
     assert subs[0]["dev_weighted"] is None and autopilot.gate(run_row("new", 0.5), subs, cfg(), NOW)[0]
+
+
+def test_a_submission_codabench_never_scores_stops_blocking_after_three_hours(tmp_path):
+    # regression: 971508 (ens-79d0d049) stayed Running for hours on 9 Oct 2026 and held back every
+    # later submission, its own resubmission included
+    state, work = tmp_path / "state", tmp_path / "work"
+    registry.append(state / "submissions.jsonl", sub_row("ens-a", 0.83, status="Running", day="2026-10-07"))
+    # submitted 01:00, so at 03:00 it is still only slow
+    early = dt.datetime(2026, 10, 7, 3, 0, tzinfo=dt.timezone.utc)
+    autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", client=FakeClient(status="Running"),
+                    now=early, fetch_board=board_rows, push=False)
+    assert autopilot.latest_submissions(registry.read(state / "submissions.jsonl"))[0]["status"] == "Running"
+    out = autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", client=FakeClient(status="Running"),
+                          now=NOW, fetch_board=board_rows, push=False)
+    subs = autopilot.latest_submissions(registry.read(state / "submissions.jsonl"))
+    assert subs[0]["status"] == "Stalled" and any("no longer holds back" in n for n in out["notes"])
+    assert out["waiting"] is True  # still polled, so a late score is recorded
+    c = cfg()
+    assert autopilot.gate(run_row("b", 0.82), subs, c, NOW)[0]  # its 0.83 no longer sets the bar
+    assert autopilot.gate(run_row("ens-a", 0.83), subs, c, NOW)[0]  # and it may go again
+    assert autopilot.candidate([run_row("ens-a", 0.83)], subs)["run_id"] == "ens-a"
+    # a late result still lands
+    autopilot.cycle(cfg(), QUEUE, state, work, FakeKaggle(), "sha", "me", client=FakeClient(status="Finished"),
+                    now=NOW, fetch_board=board_rows, push=False)
+    assert autopilot.latest_submissions(registry.read(state / "submissions.jsonl"))[0]["status"] == "Finished"
