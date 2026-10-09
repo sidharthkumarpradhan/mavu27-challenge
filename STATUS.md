@@ -1,8 +1,10 @@
-# ReVA autopilot status (2026-10-09T07:44:32Z)
+# ReVA autopilot status (2026-10-09T09:14:43Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- Colab: ft-8b-32f-a100-20321a8a on A100, 1.4 h in at 2026-10-09T07:16:34Z, 86.45 units at start; last log line: -
+- leaderboard: 9 rows, 0 new; leader mkhlystun 0.8795
+- arena: ens-79d0d049 = mean of 2 runs, dev weighted 0.8288 vs best single 0.8210
+- next candidate ens-79d0d049: dev weighted 0.8288 +/- 0.0174, projected board 0.8295 (2 calibration pairs); leader 0.8795, below by 0.0500
+- submitted ens-79d0d049 as 971508 (fill_test): dev 0.8288 vs best submitted 0.8130; status Running
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 - Kaggle weekly GPU quota reached on account 1
 - GPU quota pacing on Kaggle account 2: 28.4 h used in 7 days
@@ -14,12 +16,12 @@
 |---|---|---|
 | 1 | mkhlystun | 0.8795 |
 | 2 | h | 0.8625 |
-| 3 | am | 0.8393 |
-| 4 | Vincente | 0.8355 |
-| 5 | amirmazaheri | 0.8313 |
-| 6 | StagAI | 0.8125 |
-| 7 | Hoang Bui | 0.6793 |
-| 8 | chrisathy | 0.2515 |
+| 3 | T.H | 0.8438 |
+| 4 | am | 0.8400 |
+| 5 | Vincente | 0.8355 |
+| 6 | amirmazaheri | 0.8313 |
+| 7 | StagAI | 0.8125 |
+| 8 | Hoang Bui | 0.6793 |
 
 ## Gap to the leader (best submission ft-8b-4bit-16f-62f77933)
 
@@ -48,6 +50,10 @@
 
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
+| ens-79d0d049 | ok | 0.8288 | 0.8249 | 0 | mean of top 2 on dev: ft-8b-32f-a100-20321a8a, ft-8b-4bit-16f-62f77933; P(beats ft-8b-32f-a100-20321a8a) 0.63 |
+| zs-32b-4bit-a100-127cb717 | ok | 0.7676 | 0.7634 | 0.953 | zero-shot Qwen3-VL-32B in 4-bit on a Colab A100, set up like zs-8b-4bit. A ceiling probe before a 32B fine-tune |
+| zs-32b-4bit-a100-127cb717 | failed | nan | nan |  |  |
+| ft-8b-32f-a100-20321a8a | ok | 0.8210 | 0.8233 | 1.416 | Qwen3-VL-8B in bf16 on a Colab A100, 32 frames, a full epoch. The strongest model the compute allows, aimed at Temporal Grounding |
 | ft-8b-32f-a100-20321a8a | failed | nan | nan |  |  |
 | ft-8b-32f-a100-20321a8a | failed | nan | nan |  |  |
 | ft-8b-4bit-16f-1ep-2d94b189 | partial | nan | nan |  |  |
@@ -64,10 +70,6 @@
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | ok | nan | nan | 10.889 | zero-shot Qwen3-VL-8B in 4-bit. Does the bigger backbone pay for its speed on a T4 |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
-| zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
-| ft-4b-16f-830869b1 | failed | nan | nan |  |  |
-| zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
-| zs-4b-6254e8de | ok | 0.7159 | 0.7191 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
 
-Submissions used: 3 of 100. GPU hours, last 7 days: 35.7 of 30.
+Submissions used: 4 of 100. GPU hours, last 7 days: 35.7 of 30.
 Active job: none
