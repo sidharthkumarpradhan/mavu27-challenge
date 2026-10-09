@@ -201,10 +201,20 @@ class Kaggle:
                 raise KaggleTimeout(f"dataset {ref} still '{state}' after {timeout_s / 60:.0f} min")
             self.sleep(poll_s)
 
-    def dataset_download(self, ref: str, dest: Path) -> Path:
+    def dataset_download(self, ref: str, dest: Path, timeout_s: float = 900, poll_s: float = 30) -> Path:
+        """Download and unzip `ref`. A version Kaggle has just processed can still 404 for a
+        minute or so (seen 9 Oct 2026: 'ready' at 03:14, download 404 at 03:15), so a failed
+        download is retried until `timeout_s`; the last error is raised after that."""
         Path(dest).mkdir(parents=True, exist_ok=True)
-        self._run("datasets", "download", ref, "-p", str(dest), "--unzip", "-q")
-        return Path(dest)
+        end = self.clock() + timeout_s
+        while True:
+            try:
+                self._run("datasets", "download", ref, "-p", str(dest), "--unzip", "-q")
+                return Path(dest)
+            except KaggleError:
+                if self.clock() >= end:
+                    raise
+                self.sleep(poll_s)
 
 
 def owner(slug: str) -> str:
