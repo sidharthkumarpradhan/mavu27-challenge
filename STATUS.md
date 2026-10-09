@@ -1,4 +1,4 @@
-# ReVA autopilot status (2026-10-09T04:27:21Z)
+# ReVA autopilot status (2026-10-09T04:48:13Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
@@ -47,6 +47,8 @@
 
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
+| ft-8b-32f-a100-20321a8a | failed | nan | nan |  |  |
+| ft-8b-32f-a100-20321a8a | failed | nan | nan |  |  |
 | ft-8b-4bit-16f-1ep-2d94b189 | partial | nan | nan |  |  |
 | ft-4b-32f-1ep-9bd3414d | failed | nan | nan |  |  |
 | ft-8b-32f-a100-20321a8a | partial | nan | nan |  |  |
@@ -65,7 +67,6 @@
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 | zs-8b-4bit-029fe922 | failed | nan | nan |  |  |
 | zs-4b-6254e8de | ok | 0.7159 | 0.7191 | 7.076 | zero-shot Qwen3-VL-4B, 16 frames. Baseline, T4 seconds per question, first submission (confirms the format) |
-| text-4b-f571bdb5 | ok | 0.4835 | 0.4953 | 0.099 | text-only probe. How much the options alone give away (paper's text-only result is 29.95%) |
 
 Submissions used: 3 of 100. GPU hours, last 7 days: 35.7 of 30.
 Active job: none
