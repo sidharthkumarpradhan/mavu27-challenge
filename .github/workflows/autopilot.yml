@@ -101,6 +101,9 @@ jobs:
           started=$(date +%s); crashed=0
           while :; do
             rm -f outcome.json
+            # the Colab workflow commits its runs to the state branch while this loop waits; read them
+            # before the cycle, or a finished Colab run waits a whole cycle to be seen (9 Oct 2026)
+            git -C state pull -q --rebase origin state || { git -C state rebase --abort || true; }
             python -m reva.cli autopilot --state state --work work/autopilot --sha "$(git rev-parse HEAD)" \
               --outcome outcome.json $nopush || crashed=1
             # save state

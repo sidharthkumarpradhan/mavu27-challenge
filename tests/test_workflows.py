@@ -165,3 +165,10 @@ def test_the_autopilot_starts_colab_sessions_every_cycle(tmp_path):
     assert not start(failed % head)  # a failure needs a fix first
     assert start(failed % "0ld")  # the fix moved main: try the new code once
     assert not start("[]", colab="off")  # kill switch
+
+
+def test_each_autopilot_cycle_reads_the_latest_state():
+    # regression: the 07:44Z cycle on 9 Oct 2026 missed a Colab run committed at 07:27Z
+    text = (ROOT / ".github" / "workflows" / "autopilot.yml").read_text()
+    loop = text[text.index("while :; do"):]
+    assert loop.index("git -C state pull") < loop.index("python -m reva.cli autopilot")
