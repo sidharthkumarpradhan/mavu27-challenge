@@ -1,10 +1,8 @@
-# ReVA autopilot status (2026-10-09T03:52:03Z)
+# ReVA autopilot status (2026-10-09T04:27:21Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- could not stage ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189; it starts fresh: `kaggle datasets download tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 -p work/autopilot/stash-copy/ft-8b-4bit-16f-1ep-2d94b189 --unzip -q` exited 1: Dataset URL: https://www.kaggle.com/datasets/tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189
-License(s): CC0-1.0
-404 Client Error: Not Found for url: https://api.kaggle.com/v1/datasets.DatasetApiService/DownloadDataset
+- copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 - Kaggle weekly GPU quota reached on account 1
 - GPU quota pacing on Kaggle account 2: 28.4 h used in 7 days
 - no Kaggle account can take the next job; it waits
