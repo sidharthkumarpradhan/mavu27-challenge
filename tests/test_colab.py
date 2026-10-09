@@ -49,7 +49,9 @@ class FakeCLI:
             if "EXIT_CODE" in code:
                 self.left -= 1
                 return 0, "train step 10\nEXIT_CODE " + ("running" if self.left > 0 else "0")
-            return 0, "TARRED" if "tar" in code else "RESTORED []"
+            if "RESTORED" in code:
+                return 0, "RESTORED []"
+            return 0, "TARRED"
         if args[0] == "download":
             run_id = self.started["run_id"]
             d = self.tmp / "vm" / run_id
@@ -127,7 +129,8 @@ def test_an_unfinished_colab_run_resumes_from_its_archive(tmp_path):
     assert first["ran"]["status"] == "partial" and first["ran"]["resumable"] and first["more"]
     again = FakeCLI(tmp_path / "2")
     second, notes, _ = run(tmp_path, again, k, state)
-    assert k.downloads == [first["ran"]["stash"]] and again.uploaded == [[str(tmp_path / "work" / f"{first['ran']['run_id']}-restore.tar"), "/content/restore.tar"]]
+    tar = str(tmp_path / "work" / f"{first['ran']['run_id']}-restore.tar")
+    assert k.downloads == [first["ran"]["stash"]] and again.uploaded == [[tar + ".part0000", "/content/restore.tar.part0000"]]
     assert second["ran"]["status"] == "ok" and any("resuming" in n for n in notes)
 
 
@@ -358,3 +361,48 @@ def test_a_failed_snapshot_never_stops_the_session(tmp_path):
 
 def test_the_snapshot_code_parses():
     compile(colab.snapshot_code("ft-x-1"), "snap", "exec")
+
+
+class FlakyUpload:
+    """A colab CLI whose upload fails `fails` times before it works; keeps every part it got."""
+
+    def __init__(self, fails=0):
+        self.fails, self.got = fails, []
+
+    def __call__(self, cmd, timeout=None):
+        if self.fails:
+            self.fails -= 1
+            return 1, "[colab] Upload failed: SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol'))"
+        self.got.append((cmd[-1], Path(cmd[-2]).read_bytes()))
+        return 0, ""
+
+
+def test_a_large_saved_state_goes_up_in_parts_and_joins_back(tmp_path):
+    # regression: the runtime dropped a 480 MB checkpoint sent as one request (9 Oct 2026)
+    run_dir = tmp_path / "src" / "r1"
+    (run_dir / "ckpt").mkdir(parents=True)
+    (run_dir / "ckpt" / "state.pt").write_bytes(bytes(range(256)) * 400)
+    tar = tmp_path / "r1-restore.tar"
+    with tarfile.open(tar, "w") as t:
+        t.add(run_dir, arcname="r1")
+    cli = FlakyUpload(fails=1)  # the first part fails once and goes again
+    n = colab.upload_parts(colab.Colab(runner=cli), "s", tar, "/content/restore.tar", part_bytes=10_000)
+    assert n == len(cli.got) > 1 and [r for r, _ in cli.got] == [f"/content/restore.tar.part{i:04d}" for i in range(n)]
+    assert not list(tmp_path.glob("*.part*"))  # local parts are cleaned up
+    # run the join on "the runtime": /content mapped to a temp folder
+    vm = tmp_path / "vm"
+    vm.mkdir()
+    for remote, data in cli.got:
+        (vm / Path(remote).name).write_bytes(data)
+    code = colab.restore_code("r1", n, tar.stat().st_size).replace("/content", str(vm))
+    exec(compile(code, "restore", "exec"), {})
+    assert (vm / "out" / "r1" / "ckpt" / "state.pt").read_bytes() == bytes(range(256)) * 400
+    assert [p.name for p in vm.iterdir()] == ["out"]  # the parts and the joined tar are gone
+
+
+def test_a_part_that_keeps_failing_fails_the_session_loudly(tmp_path):
+    tar = tmp_path / "x.tar"
+    tar.write_bytes(b"x" * 100)
+    with pytest.raises(colab.ColabError, match="Upload failed"):
+        colab.upload_parts(colab.Colab(runner=FlakyUpload(fails=3)), "s", tar, "/content/restore.tar", part_bytes=60)
+    assert not list(tmp_path.glob("*.part*"))

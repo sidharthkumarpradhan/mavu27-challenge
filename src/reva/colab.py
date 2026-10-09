@@ -196,13 +196,52 @@ print("SNAPPED" if ok else "NOTHING TO SAVE YET")
 '''
 
 
-def restore_code(run_id: str) -> str:
+def restore_code(run_id: str, parts: int, size: int) -> str:
+    """Join the uploaded parts (upload_parts) into the saved state's tar and unpack it."""
     return f'''import os, tarfile
+tar = "/content/restore.tar"
+with open(tar, "wb") as out:
+    for i in range({parts}):
+        part = tar + ".part%04d" % i
+        with open(part, "rb") as f:
+            out.write(f.read())
+        os.remove(part)
+if os.path.getsize(tar) != {size}:
+    raise SystemExit("restore.tar has %d bytes, not {size}" % os.path.getsize(tar))
 os.makedirs({OUT!r}, exist_ok=True)
-with tarfile.open("/content/restore.tar") as t:
+with tarfile.open(tar) as t:
     t.extractall({OUT!r}, filter="data")
+os.remove(tar)
 print("RESTORED", sorted(os.listdir({OUT + "/" + run_id!r})))
 '''
+
+
+PART_BYTES = 32 << 20
+
+
+def upload_parts(colab: Colab, name: str, local: Path, remote: str, part_bytes: int = PART_BYTES,
+                 tries: int = 3) -> int:
+    """Upload `local` as `remote`.part0000, .part0001, ... and return how many parts it took.
+    The CLI sends a file as one base64 JSON request, and the runtime dropped a 480 MB checkpoint
+    sent that way twice (SSL EOF, 9 Oct 2026). Parts of 32 MiB stay well under any request limit,
+    and each is tried `tries` times."""
+    n = 0
+    with open(local, "rb") as f:
+        while chunk := f.read(part_bytes):
+            part = Path(f"{local}.part{n:04d}")
+            part.write_bytes(chunk)
+            try:
+                for attempt in range(tries):
+                    try:
+                        colab.upload(name, part, f"{remote}.part{n:04d}")
+                        break
+                    except ColabError:
+                        if attempt == tries - 1:
+                            raise
+            finally:
+                part.unlink(missing_ok=True)
+            n += 1
+    return n
 
 
 LOST_AFTER = 3  # failed polls in a row (15 minutes) that mean the session is gone
@@ -229,8 +268,11 @@ def session(colab: Colab, cfg: dict, sha: str, repo: str, pip: list[str], gpu: s
     tail, ended = "", False
     try:
         if restore is not None:  # the run's saved state, where reva.job looks for it
-            colab.upload(name, restore, "/content/restore.tar")
-            log(colab.exec(name, restore_code(run_id), timeout=600).strip())
+            parts = upload_parts(colab, name, restore, "/content/restore.tar")
+            out = colab.exec(name, restore_code(run_id, parts, restore.stat().st_size), timeout=600).strip()
+            if "RESTORED" not in out:
+                raise ColabError(f"could not restore {run_id}'s saved state: {out[-500:]}")
+            log(out)
         log(colab.exec(name, start_code(cfg, sha, repo, pip), timeout=120).strip())
         report(stage="started", hours_in=(clock() - t0) / 3600, last="")
         end = t0 + 3600 * hours - 1200  # leave 20 minutes to download and archive
