@@ -27,6 +27,17 @@ def test_default_config_loads():
     assert C.get(cfg, "submit.format") in package.FORMATS
 
 
+def test_jobs_fetch_code_from_the_repo_running_the_workflow(monkeypatch):
+    # regression: 9 Oct 2026 the loop moved to lanternpointlabs while remote.repo still named the
+    # sidharthkumarpradhan repo, which had gone private, so every new GPU job would fail to fetch
+    cfg = {"remote": {"repo": "https://github.com/a/old"}}
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    assert C.code_repo(cfg) == "https://github.com/a/old"
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lanternpointlabs/reva")
+    assert C.code_repo(cfg) == "https://github.com/lanternpointlabs/reva"
+
+
 def test_holdout_is_stratified_and_disjoint():
     rows = make_rows("train", 10)
     keep, held = data.stratified_holdout(rows, 0.2, seed=1)

@@ -166,7 +166,7 @@ def build(base: dict, lanes: list[dict], sha: str, out_dir: str | Path, user: st
     tail = f"-{stamp}" if stamp else ""
     # Kaggle titles take at most 50 characters; trim the run id, never the stamp
     slug = f"{user}/" + (f"reva-{lanes[0]['run_id']}"[:50 - len(tail)].rstrip("-") + tail).lower()
-    (out_dir / "job.py").write_text(kernel_script(lanes, sha, C.get(base, "remote.repo"), C.get(base, "remote.pip"),
+    (out_dir / "job.py").write_text(kernel_script(lanes, sha, C.code_repo(base), C.get(base, "remote.pip"),
                                                   resume))
     meta = kernel_metadata(slug, "job.py", gpu=True, accelerator=C.get(base, "remote.accelerator"),
                            dataset_sources=sorted(set((resume or {}).values())))

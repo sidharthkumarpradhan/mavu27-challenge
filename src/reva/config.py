@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,15 @@ def get(cfg: dict[str, Any], dotted: str, default: Any = None) -> Any:
             return default
         node = node[key]
     return node
+
+
+def code_repo(cfg: dict[str, Any]) -> str:
+    """The repo a GPU job fetches this code from. Under GitHub Actions it is the repo running the
+    workflow, so the loop works from a copy on another account without a config change (9 Oct 2026:
+    it moved to lanternpointlabs when the sidharthkumarpradhan repo went private). The job fetches
+    without credentials, so that repo must be public. Elsewhere it is `remote.repo`."""
+    server, repo = os.environ.get("GITHUB_SERVER_URL"), os.environ.get("GITHUB_REPOSITORY")
+    return f"{server}/{repo}" if server and repo else get(cfg, "remote.repo")
 
 
 def override(cfg: dict[str, Any], pairs: dict[str, Any]) -> dict[str, Any]:
