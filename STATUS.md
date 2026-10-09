@@ -1,11 +1,7 @@
-# ReVA autopilot status (2026-10-09T03:48:29Z)
+# ReVA autopilot status (2026-10-09T03:52:03Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 8 rows, 0 new; leader mkhlystun 0.8795
-- saved ft-8b-4bit-16f-1ep-2d94b189 (partial) to private dataset tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189
-- saved ft-4b-32f-1ep-9bd3414d (failed) to private dataset tubu9938/reva-run-ft-4b-32f-1ep-9bd3414d
-- job tubu9938/reva-ft-8b-4bit-16f-1ep-2d94b189-10082226 complete; failed lanes: ['ft-4b-32f-1ep-9bd3414d'] 
-- collected ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d']
 - could not stage ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189; it starts fresh: `kaggle datasets download tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 -p work/autopilot/stash-copy/ft-8b-4bit-16f-1ep-2d94b189 --unzip -q` exited 1: Dataset URL: https://www.kaggle.com/datasets/tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 License(s): CC0-1.0
 404 Client Error: Not Found for url: https://api.kaggle.com/v1/datasets.DatasetApiService/DownloadDataset
