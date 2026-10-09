@@ -201,20 +201,42 @@ class Kaggle:
                 raise KaggleTimeout(f"dataset {ref} still '{state}' after {timeout_s / 60:.0f} min")
             self.sleep(poll_s)
 
-    def dataset_download(self, ref: str, dest: Path, timeout_s: float = 900, poll_s: float = 30) -> Path:
-        """Download and unzip `ref`. A version Kaggle has just processed can still 404 for a
-        minute or so (seen 9 Oct 2026: 'ready' at 03:14, download 404 at 03:15), so a failed
-        download is retried until `timeout_s`; the last error is raised after that."""
-        Path(dest).mkdir(parents=True, exist_ok=True)
+    def dataset_files(self, ref: str) -> list[str]:
+        """Paths of every file in the dataset's current version."""
+        out = self._run("datasets", "files", ref, "--csv", "--page-size", "200")
+        lines = out.strip().splitlines()
+        head = next((i for i, line in enumerate(lines) if line.startswith("name,")), None)
+        if head is None:
+            raise KaggleError(f"unexpected `kaggle datasets files {ref}` output: {out.strip()[-300:]}")
+        return [line.rsplit(",", 2)[0] for line in lines[head + 1:] if line.strip()]
+
+    def dataset_file(self, ref: str, path: str, dest: Path, timeout_s: float = 600, poll_s: float = 30) -> Path:
+        """One file of `ref`, saved at dest/<path>. The CLI saves it under its base name, so it goes
+        into the right subfolder. A failed download is retried until `timeout_s`."""
+        folder = Path(dest) / Path(path).parent
+        folder.mkdir(parents=True, exist_ok=True)
         end = self.clock() + timeout_s
         while True:
             try:
-                self._run("datasets", "download", ref, "-p", str(dest), "--unzip", "-q")
-                return Path(dest)
+                self._run("datasets", "download", ref, "-f", path, "-p", str(folder), "-q")
+                return folder / Path(path).name
             except KaggleError:
                 if self.clock() >= end:
                     raise
                 self.sleep(poll_s)
+
+    def dataset_download(self, ref: str, dest: Path) -> Path:
+        """Every file of `ref` under dest. The whole-dataset download needs an archive that Kaggle
+        builds after each version, and it 404'd for over an hour on a fresh version (9 Oct 2026)
+        while single files downloaded at once. So a failed archive download falls back to fetching
+        the files one by one."""
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        try:
+            self._run("datasets", "download", ref, "-p", str(dest), "--unzip", "-q")
+        except KaggleError:
+            for path in self.dataset_files(ref):
+                self.dataset_file(ref, path, dest)
+        return Path(dest)
 
 
 def owner(slug: str) -> str:
@@ -260,6 +282,9 @@ class Accounts:
 
     def dataset_download(self, ref: str, dest: Path) -> Path:
         return self._for(ref).dataset_download(ref, dest)
+
+    def dataset_file(self, ref: str, path: str, dest: Path) -> Path:
+        return self._for(ref).dataset_file(ref, path, dest)
 
 
 def from_env(home_root: str | Path | None = None, environ: dict[str, str] | None = None) -> Accounts | Kaggle:
