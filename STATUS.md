@@ -1,7 +1,8 @@
-# ReVA autopilot status (2026-10-09T11:51:32Z)
+# ReVA autopilot status (2026-10-09T12:12:06Z)
 
-- Codabench login failed: login failed (500)
+- Codabench login ok; account may submit
 - leaderboard: 9 rows, 0 new; leader mkhlystun 0.8795
+- Colab: ft-32b-4bit-a100-5f522e72 on A100, 0.0 h in at 2026-10-09T11:52:35Z, 72.67 units at start; last log line: -
 - next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8216 (2 calibration pairs); leader 0.8795, below by 0.0579
 - not submitting ft-8b-32f-a100-20321a8a: a submission is still being scored
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
