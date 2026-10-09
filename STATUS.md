@@ -1,11 +1,10 @@
-# ReVA autopilot status (2026-10-09T12:32:37Z)
+# ReVA autopilot status (2026-10-09T12:54:35Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 9 rows, 0 new; leader mkhlystun 0.8795
-- submission 971508 (ens-79d0d049) still Running after 3 h; it no longer holds back the next submission
-- Colab: ft-32b-4bit-a100-5f522e72 on A100, 0.3 h in at 2026-10-09T12:12:47Z, 72.67 units at start; last log line: -
-- next candidate ens-79d0d049: dev weighted 0.8288 +/- 0.0174, projected board 0.8295 (2 calibration pairs); leader 0.8795, below by 0.0500
-- submitted ens-79d0d049 as 972027 (fill_test): dev 0.8288 vs best submitted 0.8130; status Finished
+- leaderboard: 9 rows, 1 new; leader mkhlystun 0.8795
+- Colab: ft-32b-4bit-a100-5f522e72 on A100, 1.0 h in at 2026-10-09T12:53:21Z, 72.67 units at start; last log line: -
+- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.8795, below by 0.0578
+- not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 - Kaggle weekly GPU quota reached on account 1
 - GPU quota pacing on Kaggle account 2: 28.4 h used in 7 days
@@ -21,7 +20,7 @@
 | 4 | am | 0.8400 |
 | 5 | Vincente | 0.8355 |
 | 6 | amirmazaheri | 0.8313 |
-| 7 | StagAI | 0.8125 |
+| 7 | StagAI | 0.8297 |
 | 8 | Hoang Bui | 0.6793 |
 
 ## Gap to the leader (best submission ens-79d0d049)
