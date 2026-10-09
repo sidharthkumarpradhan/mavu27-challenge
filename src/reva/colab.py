@@ -84,7 +84,7 @@ class Colab:
     def _run(self, *args: str, timeout: float | None = None) -> str:
         code, out = self.runner([*self.cli, *args], timeout)
         if code != 0:
-            raise ColabError(f"`colab {args[0]}` exited {code}: {redact(out.strip()[-800:])}")
+            raise ColabError(f"`colab {args[0]}` exited {code}: {redact(out.strip())[-800:]}")
         return out
 
     def usage(self) -> tuple[float, float]:

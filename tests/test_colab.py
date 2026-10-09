@@ -427,3 +427,11 @@ def test_colab_errors_never_carry_the_runtime_proxy_token():
     with pytest.raises(colab.ColabError) as e:
         colab.Colab(runner=lambda cmd, timeout=None: (1, out)).upload("s", Path("x"), "/content/x")
     assert "eyJ" not in str(e.value) and "colab-runtime-proxy-token=***" in str(e.value)
+
+
+def test_a_token_cut_by_the_error_tail_is_still_redacted():
+    # the 800-character tail must not start inside a token and keep its suffix
+    out = "x" * 50 + "colab-runtime-proxy-token=" + "eyJ" + "S" * 790 + " (Caused by SSLError)"
+    with pytest.raises(colab.ColabError) as e:
+        colab.Colab(runner=lambda cmd, timeout=None: (1, out)).upload("s", Path("x"), "/content/x")
+    assert "SSSS" not in str(e.value)
