@@ -1,10 +1,9 @@
-# ReVA autopilot status (2026-10-09T09:14:43Z)
+# ReVA autopilot status (2026-10-09T09:55:40Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 9 rows, 0 new; leader mkhlystun 0.8795
-- arena: ens-79d0d049 = mean of 2 runs, dev weighted 0.8288 vs best single 0.8210
-- next candidate ens-79d0d049: dev weighted 0.8288 +/- 0.0174, projected board 0.8295 (2 calibration pairs); leader 0.8795, below by 0.0500
-- submitted ens-79d0d049 as 971508 (fill_test): dev 0.8288 vs best submitted 0.8130; status Running
+- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8216 (2 calibration pairs); leader 0.8795, below by 0.0579
+- not submitting ft-8b-32f-a100-20321a8a: a submission is still being scored
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
 - Kaggle weekly GPU quota reached on account 1
 - GPU quota pacing on Kaggle account 2: 28.4 h used in 7 days
