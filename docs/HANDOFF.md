@@ -161,6 +161,14 @@ These are the first things the first job will tell us. Check its log before trus
   of each video. So more epochs on the same data are unlikely to give a step change. That lowers
   the expectation for ft-8b-32f-a100-3ep toward the low end of 0.86 to 0.90. No run seen so far
   points at the 0.947 dev that beating 0xyuan needs.
+- Paraphrases. A dev question has a near-paraphrase in train when a train question on the same
+  video and task shares at least half its words and its answer text is among the dev options.
+  231 of 1,805 dev rows have one, and its answer is right 99.1% of the time. Only 58 of 4,000
+  test rows have one. So remembering train answers better cannot carry over to test. Dev rows
+  with a paraphrase score ft-8b 0.861, ft-32b 0.870.
+- Val overlap: 392 test rows duplicate a val question exactly and 41 more paraphrase one (1,534
+  sit on a val video). Even if training on val got all 433 right, against about 0.83 now, the gain
+  is about 0.018. It stays the owner's call (`train.refit_with_val`), and it would not win alone.
 
 ## Rebuild from scratch
 
