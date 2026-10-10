@@ -1,8 +1,7 @@
-# ReVA autopilot status (2026-10-10T19:33:58Z)
+# ReVA autopilot status (2026-10-10T20:22:19Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 10 rows, 0 new; leader 0xyuan 0.9375
-- arena: ens-ebbfe5d8 = mean of 3 runs, dev weighted 0.8361 vs best single 0.8304
 - next candidate ens-ebbfe5d8: dev weighted 0.8361 +/- 0.0171, projected board 0.8369 (3 calibration pairs); leader 0.9375, below by 0.1006
 - not submitting ens-ebbfe5d8: projected board 0.8369 does not beat the best rival 0.9375 by 0.01
 - queue empty: add experiments to configs/queue.yaml
