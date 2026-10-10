@@ -1,11 +1,10 @@
 {
  "run_id": "ft-32b-4bit-a100-5f522e72",
  "gpu": "A100",
- "started": "2026-10-09T15:56:15Z",
- "units_before": 51.23,
- "updated": "2026-10-09T19:53:50Z",
- "stage": "done",
- "status": "partial",
- "hours_in": 3.9,
- "units_after": 33.25
+ "started": "2026-10-10T16:31:56Z",
+ "units_before": 32.81,
+ "updated": "2026-10-10T16:35:52Z",
+ "stage": "started",
+ "hours_in": 0.052609773212009006,
+ "last": ""
 }
