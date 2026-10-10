@@ -75,3 +75,8 @@ def rank_of(rows: list[dict], owner: str) -> int | None:
         if r["owner"].lower() == owner.lower():
             return i
     return None
+
+
+def best_rival(rows: list[dict], owner: str) -> float | None:
+    """The highest overall accuracy on the board from anyone but us. None on an empty board."""
+    return max((r.get(OVERALL, 0.0) for r in rows if r["owner"].lower() != owner.lower()), default=None)

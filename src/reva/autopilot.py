@@ -222,8 +222,13 @@ def stalled(s: dict, status: str | None, now: dt.datetime) -> bool:
     return status not in DONE | FAILED and now - parse_iso(s["submitted"]) > dt.timedelta(hours=STALL_HOURS)
 
 
-def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool, str]:
-    """Should this run be submitted now? Pure function of the state, so it is unit-tested."""
+def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime,
+         rival: float | None = None) -> tuple[bool, str]:
+    """Should this run be submitted now? Pure function of the state, so it is unit-tested.
+
+    `rival` is the best overall score on the live board from anyone but us. With submit.beat_rivals
+    on, a run goes up only when its projected board score (dev plus the calibration gap) beats it by
+    submit.beat_margin: we upload to take the top spot, not to test the water (owner, 10 Oct 2026)."""
     if run.get("status") != "ok" or not run.get("zip"):
         return False, "no validated zip"
     if run.get("n", {}).get("test") != 4000:
@@ -247,6 +252,13 @@ def gate(run: dict, subs: list[dict], cfg: dict, now: dt.datetime) -> tuple[bool
                default=None)
     if best is not None and mine < best + C.get(cfg, "submit.min_gain"):
         return False, f"dev {mine:.4f} does not beat best submitted {best:.4f} by {C.get(cfg, 'submit.min_gain')}"
+    if C.get(cfg, "submit.beat_rivals"):
+        if rival is None:
+            return False, "no live leaderboard to beat"
+        p, _ = preflight.projected(mine, subs)
+        if p < rival + C.get(cfg, "submit.beat_margin"):
+            return False, (f"projected board {p:.4f} does not beat the best rival {rival:.4f} "
+                           f"by {C.get(cfg, 'submit.beat_margin')}")
     return True, f"dev {mine:.4f}" + (f" vs best submitted {best:.4f}" if best is not None else " (first submission)")
 
 
@@ -555,7 +567,8 @@ def cycle(cfg: dict, queue: list[dict], state: Path, work: Path, kaggle, sha: st
     if r:
         fsubs = fair_subs(subs, runs)
         notes.append(preflight.forecast(r, fsubs, rows[0].get("overall_accuracy") if rows else None))
-        allowed, why = gate(r, fsubs, cfg, now) if settled else (False, "older runs' dev scores not settled yet")
+        rival = board.best_rival(rows, C.get(cfg, "competition.owner") or "")
+        allowed, why = gate(r, fsubs, cfg, now, rival) if settled else (False, "older runs' dev scores not settled yet")
         if not allowed or not auto_submit or not client:
             notes.append(f"not submitting {r['run_id']}: "
                          f"{why if not allowed else 'automatic submission off' if not auto_submit else 'no Codabench login'}")

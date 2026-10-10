@@ -8,7 +8,7 @@ competition:
   phase: 30831
   task: 36510                 # the phase's only task, "ReVA VideoQA"
   deadline: "2026-11-10"      # 11:59 PM PST, workshop site
-  owner: ""                   # our Codabench username, for rank lookups (set once known)
+  owner: StagAI               # our name on the board (ens-79d0d049 scored 0.8297 there); kept out of the rivals
   organization: ""            # the "Submit as" choice on Codabench; empty submits as the account (owner, 7 Oct 2026)
 
 data:
@@ -63,6 +63,8 @@ infer:
 submit:
   format: fill_test           # tried first; if Codabench fails it, the loop tries the next layout (reva.package.FORMATS)
   min_gain: 0.003             # weighted dev accuracy must beat the best submitted run by this
+  beat_rivals: true           # upload only when the projected board score beats everyone else (owner, 10 Oct 2026)
+  beat_margin: 0.01           # by this much; board minus dev stayed within 0.002 over 3 scored runs
   total_budget: 100           # Codabench max_submissions_per_person (Failed ones do not count)
   reserve: 15                 # kept for the final week
   max_per_day: 4              # our own pacing, well under Codabench's 100 a day

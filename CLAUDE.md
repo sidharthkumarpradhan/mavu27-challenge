@@ -59,6 +59,11 @@ Decisions (from the EURS playbook, `docs/WORKFLOW.md` there):
 - Compliance before score. Evidence over intuition. Every number has a source and a date.
 - Measure before building. Find the largest (test weight x gap to leader) and work only that.
 - Ceilings before architecture. Run an oracle or probe before a big build.
+- No training until the local evidence says it can win (owner, 10 Oct 2026). Fix everything a
+  local check can find first: error analysis per task and source on dev probabilities, ensembles
+  and calibration on CPU, processor and prompt checks. A GPU run then goes out with its
+  hypothesis, the evidence behind it and its expected dev score written down first. No random
+  runs that each try one fix.
 - Simple first. Reproducible from the remote alone.
 
 ## Compliance rules for ReVA (decided before any score)
@@ -109,9 +114,13 @@ From the Codabench pages (read in full 6 Oct 2026):
   own answers, the run's own run.json records video input and no val training (a missing flag
   fails), no letter takes under 5% or over 60% of answers, and the live
   board still ranks by overall accuracy over our 11 columns. A failed run goes to `blocked.jsonl`.
-- The test labels are hidden, so no local check proves a board score. STATUS.md shows a projection
-  (dev weighted plus the mean board-minus-dev gap of our scored submissions). It is not a gate:
-  holding back until we project above the leader would skip the format check and calibration.
+- The test labels are hidden, so no local check proves a board score. The projection (dev weighted
+  plus the mean board-minus-dev gap of our scored submissions) is the closest thing. Board minus dev
+  stayed within 0.002 over our first 3 scored runs (10 Oct 2026), so it is now a gate (owner,
+  10 Oct 2026: "make sure we know that we will beat everyone, before the upload"). A run goes up
+  only when its projection beats the best rival on the live board by `submit.beat_margin` (0.01).
+  `competition.owner` (StagAI, our board name) keeps our own row out of the rivals. The format and
+  calibration were settled by the earlier uploads, which is what made this safe.
 - Arena ensembles (`reva.arena`) are candidates like any run: picked on dev only, never on the
   board. Only single video runs without refit or val training take part. Preflight reads every
   member's run.json, so one non-compliant member blocks the ensemble.

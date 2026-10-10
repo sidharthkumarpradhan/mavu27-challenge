@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from reva import autopilot, data, package, registry, remote
+from reva import autopilot, board, data, package, registry, remote
 from reva import config as C
 from reva.codabench import CodabenchError
 from reva.data import DEV_SET
@@ -20,7 +20,8 @@ QUEUE = [{"name": "zs-4b", "set": {}}, {"name": "text-4b", "set": {"model.use_vi
 
 
 def cfg():
-    return C.load()
+    # The other submission rules are tested apart from the beat-the-rivals rule, which has its own tests
+    return C.override(C.load(), {"submit.beat_rivals": False})
 
 
 def test_run_ids_follow_config():
@@ -211,6 +212,38 @@ class FakeClient:
 
 def board_rows():
     return [{"owner": "leader", "submission": 1, "created": "", "overall_accuracy": 0.87}]
+
+
+def test_gate_holds_a_run_until_it_projects_above_every_rival():
+    c = C.override(C.load(), {"submit.beat_rivals": True, "submit.beat_margin": 0.01})
+    assert C.get(C.load(), "submit.beat_rivals") is True  # on by default (owner, 10 Oct 2026)
+    assert "no live leaderboard" in autopilot.gate(run_row("a", 0.95), [], c, NOW)[1]
+    assert not autopilot.gate(run_row("a", 0.875), [], c, NOW, rival=0.8802)[0]  # below the rival
+    assert not autopilot.gate(run_row("a", 0.885), [], c, NOW, rival=0.8802)[0]  # above it, inside the margin
+    assert autopilot.gate(run_row("a", 0.891), [], c, NOW, rival=0.8802)[0]
+    # the projection carries the calibration gap: a board that ran 0.02 under dev holds the same run back
+    under = [{**sub_row("old", 0.80), "scores": {"overall_accuracy": 0.78}}]
+    assert "projected board 0.8710" in autopilot.gate(run_row("a", 0.891), under, c, NOW, rival=0.8802)[1]
+
+
+def test_best_rival_leaves_our_own_row_out():
+    rows = [{"owner": "StagAI", "overall_accuracy": 0.95}, {"owner": "mkhlystun", "overall_accuracy": 0.8802}]
+    assert board.best_rival(rows, "stagai") == 0.8802
+    assert board.best_rival(rows, "") == 0.95  # unknown name: every row counts, the safe side
+    assert board.best_rival([], "StagAI") is None
+
+
+def test_cycle_uploads_nothing_that_projects_below_the_leader(tmp_path):
+    c, state, work = C.override(cfg(), {"submit.beat_rivals": True}), tmp_path / "state", tmp_path / "work"
+    seed_annotations(work)
+    k = FakeKaggle()
+    autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", now=NOW, fetch_board=board_rows)
+    k.state, k.active_runs = "complete", json.loads((state / "active.json").read_text())["runs"]
+    client = FakeClient()
+    out = autopilot.cycle(c, QUEUE, state, work, k, "sha1", "me", client=client, auto_submit=True,
+                          now=NOW + dt.timedelta(hours=3), fetch_board=board_rows)
+    assert len(out["collected"]) == 2 and not client.submitted  # dev 0.6 against a leader at 0.87
+    assert any("best rival 0.8700" in n for n in out["notes"])
 
 
 def test_cycle_push_collect_submit(tmp_path):
