@@ -1,42 +1,40 @@
-# ReVA autopilot status (2026-10-09T20:08:07Z)
+# ReVA autopilot status (2026-10-10T16:31:01Z)
 
 - Codabench login ok; account may submit
-- leaderboard: 9 rows, 0 new; leader mkhlystun 0.8802
-- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.8802, below by 0.0585
+- leaderboard: 10 rows, 1 new; leader 0xyuan 0.9375
+- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.9375, below by 0.1158
 - not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 - copied ft-8b-4bit-16f-1ep-2d94b189's saved state from tubu9938/reva-run-ft-8b-4bit-16f-1ep-2d94b189 to sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
-- Kaggle weekly GPU quota reached on account 1
-- GPU quota pacing on Kaggle account 2: 28.4 h used in 7 days
-- no Kaggle account can take the next job; it waits
+- pushed sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631 with ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d'], resuming ['ft-8b-4bit-16f-1ep-2d94b189']
 
 ## Leaderboard (top 8)
 
 | # | owner | overall |
 |---|---|---|
-| 1 | mkhlystun | 0.8802 |
-| 2 | h | 0.8638 |
-| 3 | T.H | 0.8438 |
-| 4 | am | 0.8400 |
-| 5 | Vincente | 0.8355 |
-| 6 | amirmazaheri | 0.8313 |
-| 7 | StagAI | 0.8297 |
-| 8 | Hoang Bui | 0.6793 |
+| 1 | 0xyuan | 0.9375 |
+| 2 | mkhlystun | 0.8802 |
+| 3 | h | 0.8638 |
+| 4 | T.H | 0.8438 |
+| 5 | am | 0.8400 |
+| 6 | Vincente | 0.8355 |
+| 7 | amirmazaheri | 0.8313 |
+| 8 | StagAI | 0.8297 |
 
 ## Gap to the leader (best submission ens-79d0d049)
 
 | task | leader | ours | overall points lost |
 |---|---|---|---|
-| Temporal Grounding | 0.834 | 0.742 | 1.48 |
-| Perspective and Viewpoint | 0.894 | 0.819 | 0.90 |
-| Object and Land Cover Recognition | 0.877 | 0.833 | 0.73 |
-| Change Detection | 0.826 | 0.774 | 0.65 |
-| Trend and Pattern | 0.883 | 0.825 | 0.52 |
-| Geometric Relation | 0.897 | 0.853 | 0.45 |
-| Structural Layout | 0.879 | 0.856 | 0.20 |
-| Consequence Reasoning | 0.980 | 0.950 | 0.08 |
-| General Understanding | 0.989 | 0.983 | 0.03 |
-| Causation Reasoning | 0.950 | 0.944 | 0.03 |
-| Hypothetical Reasoning | 0.894 | 0.894 | 0.00 |
+| Temporal Grounding | 0.912 | 0.742 | 2.72 |
+| Object and Land Cover Recognition | 0.955 | 0.833 | 2.00 |
+| Perspective and Viewpoint | 0.950 | 0.819 | 1.57 |
+| Change Detection | 0.896 | 0.774 | 1.52 |
+| Trend and Pattern | 0.950 | 0.825 | 1.12 |
+| Structural Layout | 0.941 | 0.856 | 0.73 |
+| Geometric Relation | 0.920 | 0.853 | 0.68 |
+| Hypothetical Reasoning | 0.950 | 0.894 | 0.22 |
+| Causation Reasoning | 0.967 | 0.944 | 0.10 |
+| Consequence Reasoning | 0.970 | 0.950 | 0.05 |
+| General Understanding | 0.994 | 0.983 | 0.05 |
 
 ## Calibration (board minus local weighted dev, dev set unseen-v1)
 
@@ -71,5 +69,5 @@
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
 | ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 
-Submissions used: 5 of 100. GPU hours, last 7 days: 35.7 of 30.
-Active job: none
+Submissions used: 4 of 100. GPU hours, last 7 days: 35.7 of 30.
+Active job: sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631 ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d']

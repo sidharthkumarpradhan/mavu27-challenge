@@ -1,0 +1,14 @@
+{
+ "kernel": "sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631",
+ "pushed": "2026-10-10T16:31:01Z",
+ "sha": "4b68eb7ad881b38c23b716cabffd823c9bb429d3",
+ "runs": [
+  "ft-8b-4bit-16f-1ep-2d94b189",
+  "ft-4b-32f-1ep-9bd3414d"
+ ],
+ "url": "https://www.kaggle.com/code/sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631",
+ "hours": 11.5,
+ "resume": {
+  "ft-8b-4bit-16f-1ep-2d94b189": "sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189"
+ }
+}
