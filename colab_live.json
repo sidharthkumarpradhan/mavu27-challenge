@@ -3,8 +3,8 @@
  "gpu": "A100",
  "started": "2026-10-10T16:31:56Z",
  "units_before": 32.81,
- "updated": "2026-10-10T17:16:24Z",
+ "updated": "2026-10-10T17:36:42Z",
  "stage": "running",
- "hours_in": 0.7279761358764436,
+ "hours_in": 1.066388612124655,
  "last": ""
 }
