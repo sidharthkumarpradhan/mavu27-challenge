@@ -419,7 +419,7 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
     session_kw.setdefault("save", save)
     notes.append(f"Colab: {lane['run_id']} on {gpu} for up to {hours:.1f} h ({balance:.1f} units, about {rate:.1f}/h)"
                  + ("; the last session the units allow, so it predicts" if C.get(cfg, "train.final_session", False) else ""))
-    out_dir, log_tail, wall, ended = session(colab, cfg, sha, C.get(base, "remote.repo"), C.get(base, "remote.pip"), gpu,
+    out_dir, log_tail, wall, ended = session(colab, cfg, sha, C.code_repo(base), C.get(base, "remote.pip"), gpu,
                                       hours, work, restore, **session_kw)
     after, measured = colab.usage()
     row = autopilot.run_row(out_dir, "", sha, autopilot.parse_iso(now_iso), log_tail) if out_dir else {
