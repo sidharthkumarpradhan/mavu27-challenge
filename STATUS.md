@@ -1,13 +1,9 @@
-# ReVA autopilot status (2026-10-10T18:07:18Z)
+# ReVA autopilot status (2026-10-10T18:14:28Z)
 
 - Codabench login ok; account may submit
-- leaderboard fetch failed: HTTPSConnectionPool(host='www.codabench.org', port=443): Read timed out. (read timeout=60)
-- saved ft-8b-4bit-16f-1ep-2d94b189 (failed) to private dataset sidharthkumarpradhan/reva-run-ft-8b-4bit-16f-1ep-2d94b189
-- saved ft-4b-32f-1ep-9bd3414d (failed) to private dataset sidharthkumarpradhan/reva-run-ft-4b-32f-1ep-9bd3414d
-- job sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631 cancel_acknowledged; failed lanes: ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d'] 
-- collected ['ft-8b-4bit-16f-1ep-2d94b189', 'ft-4b-32f-1ep-9bd3414d']
+- leaderboard: 10 rows, 0 new; leader 0xyuan 0.9375
 - Colab: ft-32b-4bit-a100-5f522e72 on A100, 1.4 h in at 2026-10-10T17:59:18Z, 32.81 units at start; last log line: -
-- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs)
+- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.9375, below by 0.1158
 - not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 - queue empty: add experiments to configs/queue.yaml
 
@@ -15,8 +11,40 @@
 
 | # | owner | overall |
 |---|---|---|
+| 1 | 0xyuan | 0.9375 |
+| 2 | mkhlystun | 0.8802 |
+| 3 | h | 0.8638 |
+| 4 | T.H | 0.8438 |
+| 5 | am | 0.8400 |
+| 6 | Vincente | 0.8355 |
+| 7 | amirmazaheri | 0.8313 |
+| 8 | StagAI | 0.8297 |
 
-Our rank: not on the board
+Our rank: 8
+
+## Gap to the leader (best submission ens-79d0d049)
+
+| task | leader | ours | overall points lost |
+|---|---|---|---|
+| Temporal Grounding | 0.912 | 0.742 | 2.72 |
+| Object and Land Cover Recognition | 0.955 | 0.833 | 2.00 |
+| Perspective and Viewpoint | 0.950 | 0.819 | 1.57 |
+| Change Detection | 0.896 | 0.774 | 1.52 |
+| Trend and Pattern | 0.950 | 0.825 | 1.12 |
+| Structural Layout | 0.941 | 0.856 | 0.73 |
+| Geometric Relation | 0.920 | 0.853 | 0.68 |
+| Hypothetical Reasoning | 0.950 | 0.894 | 0.22 |
+| Causation Reasoning | 0.967 | 0.944 | 0.10 |
+| Consequence Reasoning | 0.970 | 0.950 | 0.05 |
+| General Understanding | 0.994 | 0.983 | 0.05 |
+
+## Calibration (board minus local weighted dev, dev set unseen-v1)
+
+| run | dev weighted | board | diff |
+|---|---|---|---|
+| zs-4b-6254e8de | 0.7159 | 0.7177 | +0.0018 |
+| ft-8b-4bit-16f-62f77933 | 0.8130 | 0.8125 | -0.0005 |
+| ens-79d0d049 | 0.8288 | 0.8297 | +0.0009 |
 
 ## Runs (newest first)
 
