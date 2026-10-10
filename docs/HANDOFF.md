@@ -1,15 +1,17 @@
-# Handoff (8 Oct 2026)
+# Handoff (10 Oct 2026)
 
-Read this first, then `CLAUDE.md`, then the relevant part of `docs/research.md`.
+Read this first, then `CLAUDE.md`, then the relevant part of `docs/research.md`. The sections
+from "Added 9 Oct" down are the current state. The dated sections above them are history.
 
 ## State
 
 - Code lives on `main`. Changes go through `feature/<name>` or `hotfix/<name>` branches and PRs.
-  The autopilot always runs `main`. `claude/serene-euler-g5spyi` is the old bootstrap branch.
-- 31 unit tests pass. `make smoke` prints READY on CPU (tiny Qwen3-VL, synthetic videos): frames,
-  LoRA steps, dev scoring, test prediction with 2-shift TTA, validated zip.
-- A zip for the real 4,000 test ids passes `reva.package.validate`.
-- No GPU job has run yet. No submission has been made. Leaderboard leader: 0.8735.
+  The autopilot always runs `main`. Run state lives on the `state` branch.
+- 155 unit tests pass. `make smoke` prints READY on CPU.
+- Board (10 Oct): 0xyuan 0.9375, mkhlystun 0.8802, h 0.8638, T.H 0.8438, am 0.84,
+  Vincente 0.8355, amirmazaheri 0.8313, StagAI (us) 0.8297, 8th.
+- 4 of 100 submissions used. Kaggle GPU: about 36 of 30 weekly hours used on the first account.
+- No GPU job runs without a written plan the owner has approved (see "Added 10 Oct").
 
 ## What has not been verified on real hardware
 
@@ -92,20 +94,74 @@ These are the first things the first job will tell us. Check its log before trus
   (`train.final_session`): training shrinks so dev and test prediction fit, and the run reaches
   the board instead of stopping mid-epoch with no predictions.
 
+## Added 9 Oct 2026
+
+- ft-8b-32f-a100 (Colab A100, bf16, 32 frames, full epoch) reached 0.821 weighted dev, our best
+  single run. zs-32b-4bit-a100 (zero-shot 32B probe) reached 0.768 against 0.744 for the 8B
+  zero-shot under the same setup (#54). So a 32B fine-tune is queued on Colab (#58).
+- The arena's ens-79d0d049 (ft-8b-32f-a100 with ft-8b-4bit-16f) scored 0.82975 on the board,
+  0.8288 on dev. It sat Running on Codabench for hours; a submission Running 3 h after upload
+  is now Stalled and stops blocking the gate (#57).
+- Colab robustness: checkpoints upload in 32 MiB parts (#51), a Colab CLI failure counts as an
+  environment failure and proxy tokens are redacted from run rows (#52, #53), Kaggle dataset
+  downloads retry a fresh 404 for 15 minutes (#49) and fall back to file by file (#56).
+- The autopilot pulls the state branch before each cycle (#55). Kaggle and Colab jobs fetch code
+  from the repo running the workflow (#60). `docs/PLAYBOOK.md` is the reusable workflow (#48).
+- The state branch history holds Colab proxy tokens from before #52. If it ever moves to a public
+  repo, push it as one fresh commit, never with its history.
+
+## Added 10 Oct 2026
+
+- Owner's policy: no training until the local evidence says it can win. Fix what a local check can
+  find first. A GPU run goes out with its hypothesis, the evidence and the expected dev written down.
+- Upload gate (#61): a run goes up only when its projection (dev plus the mean board-minus-dev gap
+  of our scored runs, within 0.002 so far) beats the best rival on the live board by 0.01. Today
+  that needs about 0.947 weighted dev. Our own row (`competition.owner: StagAI`) is not a rival.
+- Local error analysis on dev only (unseen-v1, 1,805 questions), scored to the test mix:
+  - Weighted dev: ft-8b-32f 0.8210, zs-32b 0.7676, zs-4b 0.7159. A probability blend of
+    ft-8b-32f with zs-32b at weight 0.2 gives 0.8311 (0.1: 0.8302, 0.3: 0.826, 0.5: 0.8088).
+    An oracle that takes any run's right answer reaches 0.9069, so these runs alone cannot win.
+  - ft-8b-32f per task: Temporal Grounding 0.742, Geometric Relation 0.766, Change Detection
+    0.798, Perspective and Viewpoint 0.812, Object and Land Cover 0.813, Trend and Pattern 0.822,
+    Structural Layout 0.860. zs-32b is better on Object and Land Cover (0.841) and Hypothetical.
+  - Test-weighted points lost by (source, task), blend: Hawk_UAV Temporal Grounding 3.03 (dev
+    0.709), Hawk Perspective 1.24, ERA_Tra Object/Land Cover 1.07, ERA Change Detection 1.00,
+    Hawk Geometric 0.98, VisDrone Object/Land Cover 0.93. 16.94 points lost in total.
+  - Hawk Temporal Grounding options sit 0.5 s apart, so frame timing is the limit there.
+  - Confidence: at max probability 0.9 or more, 96.7% right (1,013 questions). Below 0.6,
+    about half right. No pipeline bug was found.
+- The analysis ran from session scratch scripts. They move into the repo as a module next, so it
+  runs from the remote alone.
+- Running: Colab ft-32b-4bit-a100-5f522e72 (32B QLoRA, resumed 16:31Z). It goes through the gate
+  like any run; score it per task and source and in the blend before any plan.
+- Stopped by the owner: Kaggle ft-8b-4bit-16f-1ep (8B 4-bit, 16 frames, one epoch over sessions).
+  It, ft-4b-32f-1ep (out of GPU memory on a T4 at 32 frames) and ft-q35-4b-16f are commented out
+  of the queue (#62) and return only with an approved plan.
+
+## Rebuild from scratch
+
+1. Fork or clone the repo. `make install`, `make test`, `make smoke` (prints READY).
+2. Secrets: `KAGGLE_USERNAME`, `KAGGLE_KEY` (and `_NEW` for the second account),
+   `CODABENCH_USERNAME`, `CODABENCH_PASSWORD`, `COLAB_TOKEN` (the whole
+   `~/.config/colab-cli/token.json`, see 8 Oct). Variables: `AUTOPILOT`, `AUTO_SUBMIT`, `COLAB`.
+3. The first autopilot cycle creates the `state` branch. Data comes from Hugging Face
+   `ReVA-Benchmark/ReVA` inside each job. Nothing else lives outside the repo except the private
+   Kaggle datasets `reva-run-<run id>` (checkpoints, logs, dev and test probabilities).
+4. To redo the local analysis: download a run's `dev_probs.json` from its private dataset, build
+   dev with `data.make_splits(ann, 0.08, 0)` and score with `score.summary(dev, preds, test)`.
+
 ## Next steps, in order
 
-1. Job 1 (`zs-4b` + `text-4b`): read seconds per question and dev accuracy per task. The loop
-   submits `zs-4b` itself, which confirms the format and gives the first calibration pair.
-2. Jobs 2 and 3 are queued (fine-tunes, 8B, 32 frames). Extend `configs/queue.yaml` from the gap.
-3. Work the largest test-weighted gap in STATUS.md. Today that is likely Temporal Grounding and
-   Change Detection (weakest for every team, 1,140 test questions).
-4. Paper: workshop deadline Oct 20. Start the outline once the first fine-tune is scored.
+1. When ft-32b-4bit-a100 finishes: score it on dev per task and source, search blends on dev only.
+2. Move the local analysis into the repo (`reva.analyze` plus a CLI command and tests).
+3. Write one training plan (hypothesis, evidence, expected dev) aimed at the largest losses above,
+   Hawk Temporal Grounding first. Launch only with the owner's approval.
+4. Paper: workshop deadline Oct 20. Cite ReVA (arXiv 2609.35507) and disclose every model.
 
 ## Ideas queue (not built; measure first)
 
-- 32 frames (the paper's setting) once the 16-frame speed is known.
-- Option-shift TTA with `infer.perms: 4`.
-- Refit on train plus holdout for the final submission (`train.refit: true`).
-- More backbones in the arena (Qwen2.5-VL-7B, InternVL3.5, LLaVA-OneVision) so the mix has
-  diverse members, not only Qwen3-VL variants.
-- The owner's V100 box can run `reva.job` directly for longer fine-tunes.
+- Dense frames around the asked time window for Temporal Grounding (options 0.5 s apart).
+- Per-task routing between models, picked on dev only.
+- Temperature calibration of each member before blending.
+- More backbones in the arena (Qwen2.5-VL-7B, InternVL3.5, LLaVA-OneVision) for diversity.
+- Refit on train plus holdout for the final submission (`train.refit: true`; never val).
