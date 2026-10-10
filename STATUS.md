@@ -1,10 +1,10 @@
-# ReVA autopilot status (2026-10-10T18:14:28Z)
+# ReVA autopilot status (2026-10-10T19:33:58Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 10 rows, 0 new; leader 0xyuan 0.9375
-- Colab: ft-32b-4bit-a100-5f522e72 on A100, 1.4 h in at 2026-10-10T17:59:18Z, 32.81 units at start; last log line: -
-- next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.9375, below by 0.1158
-- not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
+- arena: ens-ebbfe5d8 = mean of 3 runs, dev weighted 0.8361 vs best single 0.8304
+- next candidate ens-ebbfe5d8: dev weighted 0.8361 +/- 0.0171, projected board 0.8369 (3 calibration pairs); leader 0.9375, below by 0.1006
+- not submitting ens-ebbfe5d8: projected board 0.8369 does not beat the best rival 0.9375 by 0.01
 - queue empty: add experiments to configs/queue.yaml
 
 ## Leaderboard (top 8)
@@ -50,6 +50,8 @@ Our rank: 8
 
 | run | status | dev weighted | dev overall | hours | why |
 |---|---|---|---|---|---|
+| ens-ebbfe5d8 | ok | 0.8361 | 0.8360 | 0 | mean of top 3 on dev: ft-32b-4bit-a100-5f522e72, ft-8b-32f-a100-20321a8a, ft-8b-4bit-16f-62f77933; P(beats ft-32b-4bit-a100-5f522e72) 0.70 |
+| ft-32b-4bit-a100-5f522e72 | ok | 0.8304 | 0.8332 | 2.408 | QLoRA of Qwen3-VL-32B on a Colab A100, 16 frames, a full epoch across sessions. Its zero-shot beat the 8B's by 2.4 points |
 | ft-8b-4bit-16f-1ep-2d94b189 | failed | nan | nan |  |  |
 | ft-4b-32f-1ep-9bd3414d | failed | nan | nan |  |  |
 | ft-32b-4bit-a100-5f522e72 | partial | nan | nan |  |  |
@@ -68,8 +70,6 @@ Our rank: 8
 | ft-q35-4b-16f-e4ba68c0 | failed | nan | nan |  |  |
 | ft-8b-4bit-16f-62f77933 | ok | 0.8130 | 0.8089 | 10.058 | QLoRA fine-tune of Qwen3-VL-8B, 16 frames |
 | ft-4b-32f-527078f0 | failed | nan | nan |  |  |
-| ft-q35-4b-16f-e4ba68c0 | failed | nan | nan |  |  |
-| ft-4b-16f-830869b1 | failed | nan | nan |  |  |
 
 Submissions used: 4 of 100. GPU hours, last 7 days: 37.3 of 30.
 Active job: none
