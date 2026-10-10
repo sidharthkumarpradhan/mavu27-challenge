@@ -96,3 +96,19 @@
   gpu: A100
   set: {model.id: Qwen/Qwen3-VL-32B-Instruct, model.load_4bit: true, model.dtype: bf16, train.enabled: true, infer.perms: 4,
         train.span_sessions: true}
+# ft-32b-4bit-a100 scored 0.830 weighted dev (10 Oct 2026); no blend of our runs passes 0.839 under
+# 5-fold CV, against about 0.947 needed to beat the leader by the margin. Both fine-tunes stopped
+# after one epoch with a training loss of 0.4 to 0.55, so both underfit, and fine-tuning gained 8.2
+# points on dev questions whose video and task are in the fit split against 2.9 elsewhere (99.8% of
+# test videos are in it). Related Qwen3-VL work trains 2 to 4 epochs at 32 frames. This run carries
+# the 8B adapter on for 2 more epochs (3 in all) with the same model, frames and LoRA. Expected dev
+# 0.86 to 0.90, a judgment. One epoch took 3.8 h and prediction 1.3 h, so the run needs about 9 h
+# of job over 3 sessions, near 62 units; min_units keeps it from starting on fewer, which would make
+# the last session cut training short to predict. Owner approved, 10 Oct 2026.
+- name: ft-8b-32f-a100-3ep
+  why: two more epochs on the ft-8b-32f-a100 adapter at 32 frames in bf16. Both fine-tunes underfit after one epoch
+  backend: colab
+  gpu: A100
+  min_units: 65
+  set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.dtype: bf16, train.enabled: true, frames.n: 32, infer.perms: 4,
+        train.span_sessions: true, train.epochs: 2, train.init_from: ft-8b-32f-a100-20321a8a}

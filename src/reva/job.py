@@ -148,6 +148,18 @@ def train_deadline(cfg: dict, vlm, sp: dict, video_of, perms: int, end: float, p
     return deadline
 
 
+def start_adapter(cfg: dict, ckpt: Path | None) -> Path | str | None:
+    """The adapter training starts from: the run's own checkpoint, else train.init_adapter. A run
+    that continues another run (train.init_from) fails without that adapter rather than quietly
+    training from scratch under a run id that says otherwise."""
+    if ckpt:
+        return ckpt / "adapter"
+    init = C.get(cfg, "train.init_adapter")
+    if C.get(cfg, "train.init_from") and not (init and Path(init).is_dir()):
+        raise RuntimeError(f"train.init_from is {C.get(cfg, 'train.init_from')} but there is no adapter at {init}")
+    return init
+
+
 def run(cfg: dict, out: Path, device: str) -> dict:
     t0 = time.time()
     run_id = cfg["run_id"]
@@ -179,7 +191,7 @@ def run(cfg: dict, out: Path, device: str) -> dict:
     elif train_on:
         deadline = train_deadline(cfg, vlm, sp, video_of, perms, end, strict=not span)
         ckpt = find_checkpoint(out)
-        vlm.add_lora(cfg["train"], ckpt / "adapter" if ckpt else C.get(cfg, "train.init_adapter"))
+        vlm.add_lora(cfg["train"], start_adapter(cfg, ckpt))
         # the last session a run can pay for (train.final_session) shrinks training to fit prediction
         final = C.get(cfg, "train.final_session", False)
         stats = train(vlm, sp["fit"], video_of, cfg["train"], out, deadline, seed=C.get(cfg, "train.seed", 0),

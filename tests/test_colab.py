@@ -88,6 +88,8 @@ class FakeKaggle:
         self.downloads.append(ref)
         run_id = ref.split("reva-run-")[1]
         (Path(dest) / run_id / "ckpt").mkdir(parents=True)
+        (Path(dest) / run_id / "adapter").mkdir()
+        (Path(dest) / run_id / "adapter" / "adapter_config.json").write_text("{}")
         return Path(dest)
 
 
@@ -140,6 +142,46 @@ def test_no_session_without_the_units_for_one(tmp_path):
     assert out == {"ran": None, "more": False} and "new" not in cli.calls and "waiting" in notes[-1]
 
 
+CONTINUE = [{"name": "ft-more", "backend": "colab", "gpu": "A100", "min_units": 60,
+             "set": {"train.enabled": True, "train.init_from": "ft-old-1234"}}]
+
+
+def run_queue(tmp_path, cli, queue, state, kaggle=None):
+    notes = []
+    out = colab.run_next(cfg(), queue, state, tmp_path / "work", colab.Colab(runner=cli), kaggle or FakeKaggle(), "abc",
+                         5.0, "2026-10-09T00:00:00Z", notes, poll_s=0, sleep=lambda s: None)
+    return out, notes
+
+
+def finished_base_run(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    registry.append(state / "colab_runs.jsonl", {"run_id": "ft-old-1234", "status": "ok", "backend": "colab",
+                                                 "stash": "first/reva-run-ft-old-1234"})
+    return state
+
+
+def test_a_continued_run_starts_from_the_finished_runs_adapter(tmp_path):
+    cli, k = FakeCLI(tmp_path, balance=90.0), FakeKaggle()
+    out, notes = run_queue(tmp_path, cli, CONTINUE, finished_base_run(tmp_path), k)
+    run_id = out["ran"]["run_id"]
+    assert k.downloads == ["first/reva-run-ft-old-1234"] and any("starts from the adapter" in n for n in notes)
+    with tarfile.open(tmp_path / "work" / f"{run_id}-restore.tar") as t:
+        assert f"{run_id}/init_adapter/adapter_config.json" in t.getnames()
+    assert cli.started["train"]["init_adapter"] == f"/content/out/{run_id}/init_adapter"
+
+
+def test_a_continued_run_waits_for_the_units_to_finish_and_for_its_base_run(tmp_path):
+    cli = FakeCLI(tmp_path, balance=40.0)  # enough for a session, not for the whole run
+    out, notes = run_queue(tmp_path, cli, CONTINUE, finished_base_run(tmp_path))
+    assert out["ran"] is None and "new" not in cli.calls and "needs 60 compute units" in notes[-1]
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    cli = FakeCLI(tmp_path, balance=90.0)
+    out, notes = run_queue(tmp_path, cli, CONTINUE, empty)
+    assert out["ran"] is None and "new" not in cli.calls and "no finished saved run" in notes[-1]
+
+
 def test_a_lost_session_is_still_stopped_and_recorded(tmp_path):
     cli = FakeCLI(tmp_path)
 
@@ -164,7 +206,7 @@ def test_colab_runs_are_read_from_their_dataset(tmp_path):
 
 
 def test_queue_rejects_a_backend_typo_and_gpus_on_kaggle(tmp_path):
-    for bad in ("- name: a-b\n  backend: colb\n", "- name: a-b\n  gpu: A100\n"):
+    for bad in ("- name: a-b\n  backend: colb\n", "- name: a-b\n  gpu: A100\n", "- name: a-b\n  min_units: 50\n"):
         (tmp_path / "q.yaml").write_text(bad)
         with pytest.raises(ValueError):
             remote.load_queue(tmp_path / "q.yaml")

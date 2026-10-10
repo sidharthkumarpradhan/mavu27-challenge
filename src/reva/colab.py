@@ -46,6 +46,7 @@ Runner = Callable[[list[str], float | None], tuple[int, str]]
 PATHS = {"data.root": "/content/reva", "data.video_root": "/content/reva", "frames.cache": "/content/frames"}
 T, OUT = "/content/reva-job", "/content/out"
 SETUP_H = 1.0  # session start, pip installs, videos and frame cache, and the final download
+INIT_DIR = "init_adapter"  # where a run that continues another run's training finds that adapter
 
 
 class ColabError(RuntimeError):
@@ -119,6 +120,8 @@ def lane_config(base: dict, lane: dict, hours: float, final: bool = False) -> di
     session leaves after setup. In the `final` session the units allow, a run that spans sessions
     stops training in time to predict (train.final_session). The run id does not change."""
     over = {**PATHS, "job.max_hours": round(min(C.get(lane, "job.max_hours"), hours - SETUP_H), 2)}
+    if C.get(lane, "train.init_from"):  # the earlier run's adapter, unpacked there by run_next
+        over["train.init_adapter"] = f"{OUT}/{lane['run_id']}/{INIT_DIR}"
     if final and C.get(lane, "train.span_sessions", False):
         over["train.final_session"] = True
     return C.override(lane, over)
@@ -358,6 +361,11 @@ def next_lane(base: dict, queue: list[dict], runs: list[dict]) -> tuple[dict, st
     return (lanes[0], gpus[lanes[0]["run_id"]]) if lanes else None
 
 
+def entry(queue: list[dict], lane: dict) -> dict:
+    """The queue entry a lane came from (its run id is the entry's name plus a fingerprint)."""
+    return next(q for q in items(queue) if lane["run_id"].rsplit("-", 1)[0] == q["name"])
+
+
 def last_rate(state: Path, gpu: str) -> float:
     """Units per hour this GPU burned in our last session on it, else the estimate."""
     from reva import registry
@@ -388,6 +396,26 @@ def run_next(base: dict, queue: list[dict], state: Path, work: Path, colab: Cola
 
     restore = None
     saved = [r["stash"] for r in runs if r["run_id"] == lane["run_id"] and r.get("stash") and r.get("resumable")]
+    need = entry(queue, lane).get("min_units", 0)
+    if not saved and balance < need:  # started short, the last session would cut training to predict
+        notes.append(f"Colab: {lane['run_id']} needs {need} compute units to finish, {balance:.1f} left; waiting")
+        return {"ran": None, "more": False}
+    init_from = C.get(lane, "train.init_from")
+    if init_from and not saved:  # a new run that carries on a finished run's training
+        done = [r["stash"] for r in runs if r["run_id"] == init_from and r["status"] == "ok" and r.get("stash")]
+        if not done:
+            notes.append(f"Colab: {lane['run_id']} starts from {init_from}, which has no finished saved run; waiting")
+            return {"ran": None, "more": False}
+        copy = work / "colab-init"
+        shutil.rmtree(copy, ignore_errors=True)
+        kaggle.dataset_download(done[-1], copy)
+        adapter = copy / init_from / "adapter"
+        if not adapter.is_dir():
+            raise ColabError(f"{done[-1]} holds no adapter for {init_from}")
+        restore = work / f"{lane['run_id']}-restore.tar"
+        with tarfile.open(restore, "w") as t:
+            t.add(adapter, arcname=f"{lane['run_id']}/{INIT_DIR}")
+        notes.append(f"Colab: {lane['run_id']} starts from the adapter of {init_from} ({done[-1]})")
     if saved:  # the newest saved state, from either backend
         copy = work / "colab-restore"
         shutil.rmtree(copy, ignore_errors=True)

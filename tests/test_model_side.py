@@ -361,6 +361,19 @@ def test_a_job_never_resumes_another_runs_state(tmp_path):
         job.run({"run_id": "this-run"}, tmp_path, "cpu")
 
 
+def test_a_continued_run_starts_from_the_earlier_adapter_and_never_from_scratch(tmp_path):
+    from reva import job
+
+    init = tmp_path / "init_adapter"
+    cfg = {"train": {"init_from": "ft-a-1234", "init_adapter": str(init)}}
+    with pytest.raises(RuntimeError, match="ft-a-1234"):  # the adapter did not arrive
+        job.start_adapter(cfg, None)
+    init.mkdir()
+    assert job.start_adapter(cfg, None) == str(init)
+    assert job.start_adapter(cfg, tmp_path / "ckpt") == tmp_path / "ckpt" / "adapter"  # its own checkpoint wins
+    assert job.start_adapter({"train": {}}, None) is None
+
+
 def test_running_out_of_gpu_memory_trains_in_smaller_packs(tmp_path, monkeypatch):
     """Regression (8 Oct 2026): the fp16 4B ran out of memory on a T4 training 4 questions per
     pass and lost the job. Training now halves the pack and goes on."""
