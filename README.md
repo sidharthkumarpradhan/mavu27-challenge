@@ -29,6 +29,7 @@ configs/queue.yaml -> Kaggle job (2 lanes, one per T4) -> dev score + test zip -
 | `board`, `codabench` | public leaderboard; login, upload, submit, poll |
 | `preflight` | last checks before an upload, and the projected board score |
 | `arena` | averages the best runs' probabilities; the best top-k mix on dev becomes one more candidate |
+| `analyze` | error analysis on dev probabilities: points lost per source and task, confidence, oracle, blends |
 | `autopilot` | one cycle (twice an hour): board, collect, gated submit, push next, STATUS.md |
 | `smoke` | the whole GPU job on CPU with a tiny model and synthetic videos |
 
@@ -42,6 +43,7 @@ python -m reva.cli board                     # live leaderboard
 python -m reva.cli build --sha <commit>      # the Kaggle kernel for the next queued lanes (pushes nothing)
 python -m reva.cli job --config-json run.json --out out/   # one experiment on a local GPU
 python -m reva.cli submit --run <run_id> --state state/      # owner-triggered submission, same checks
+python -m reva.cli analyze --probs a=dev_probs.json --probs b=other.json   # where runs lose points, on dev only
 ```
 
 ## Automation

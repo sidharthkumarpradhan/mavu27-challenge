@@ -130,8 +130,8 @@ These are the first things the first job will tell us. Check its log before trus
   - Hawk Temporal Grounding options sit 0.5 s apart, so frame timing is the limit there.
   - Confidence: at max probability 0.9 or more, 96.7% right (1,013 questions). Below 0.6,
     about half right. No pipeline bug was found.
-- The analysis ran from session scratch scripts. They move into the repo as a module next, so it
-  runs from the remote alone.
+- The analysis is `reva.analyze` (`python -m reva.cli analyze --probs NAME=PATH ...`). It reproduces
+  every number above from the runs' dev probabilities and runs from the remote alone.
 - Running: Colab ft-32b-4bit-a100-5f522e72 (32B QLoRA, resumed 16:31Z). It goes through the gate
   like any run; score it per task and source and in the blend before any plan.
 - Stopped by the owner: Kaggle ft-8b-4bit-16f-1ep (8B 4-bit, 16 frames, one epoch over sessions).
@@ -147,16 +147,16 @@ These are the first things the first job will tell us. Check its log before trus
 3. The first autopilot cycle creates the `state` branch. Data comes from Hugging Face
    `ReVA-Benchmark/ReVA` inside each job. Nothing else lives outside the repo except the private
    Kaggle datasets `reva-run-<run id>` (checkpoints, logs, dev and test probabilities).
-4. To redo the local analysis: download a run's `dev_probs.json` from its private dataset, build
-   dev with `data.make_splits(ann, 0.08, 0)` and score with `score.summary(dev, preds, test)`.
+4. To redo the local analysis: download each run's `dev_probs.json` from its private dataset
+   (`kaggle datasets download sidharthkumarpradhan/reva-run-<run id>`), then run
+   `python -m reva.cli analyze --probs <name>=<path> ...`. It fetches the annotations itself.
 
 ## Next steps, in order
 
-1. When ft-32b-4bit-a100 finishes: score it on dev per task and source, search blends on dev only.
-2. Move the local analysis into the repo (`reva.analyze` plus a CLI command and tests).
-3. Write one training plan (hypothesis, evidence, expected dev) aimed at the largest losses above,
+1. When ft-32b-4bit-a100 finishes: run `reva.cli analyze` on it with ft-8b-32f and zs-32b.
+2. Write one training plan (hypothesis, evidence, expected dev) aimed at the largest losses above,
    Hawk Temporal Grounding first. Launch only with the owner's approval.
-4. Paper: workshop deadline Oct 20. Cite ReVA (arXiv 2609.35507) and disclose every model.
+3. Paper: workshop deadline Oct 20. Cite ReVA (arXiv 2609.35507) and disclose every model.
 
 ## Ideas queue (not built; measure first)
 
