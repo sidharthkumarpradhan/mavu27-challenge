@@ -56,6 +56,13 @@ def test_shipped_queue_does_not_repeat_the_first_job():
     assert "zs-4b" not in names and "text-4b" not in names
 
 
+def test_shipped_queue_holds_unapproved_kaggle_runs():
+    # stopped on 10 Oct 2026: none of these goes out again without a written hypothesis
+    names = {c["run_id"].rsplit("-", 1)[0]
+             for c in remote.pending(cfg(), autopilot.kaggle_queue(remote.load_queue("configs/queue.yaml")), set(), {})}
+    assert not names & {"ft-8b-4bit-16f-1ep", "ft-4b-32f-1ep", "ft-q35-4b-16f"}
+
+
 def test_pending_skips_done_and_repeat_failures():
     ids = [remote.run_config(cfg(), q)["run_id"] for q in QUEUE]
     left = remote.pending(cfg(), QUEUE, done={ids[0]}, failed={ids[1]: 2})
