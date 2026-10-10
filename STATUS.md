@@ -1,9 +1,9 @@
-# ReVA autopilot status (2026-10-10T16:51:40Z)
+# ReVA autopilot status (2026-10-10T17:11:12Z)
 
 - Codabench login ok; account may submit
 - leaderboard: 10 rows, 0 new; leader 0xyuan 0.9375
 - job sidharthkumarpradhan/reva-ft-8b-4bit-16f-1ep-2d94b189-10101631 is queued
-- Colab: ft-32b-4bit-a100-5f522e72 on A100, 0.1 h in at 2026-10-10T16:35:52Z, 32.81 units at start; last log line: -
+- Colab: ft-32b-4bit-a100-5f522e72 on A100, 0.4 h in at 2026-10-10T16:56:08Z, 32.81 units at start; last log line: -
 - next candidate ft-8b-32f-a100-20321a8a: dev weighted 0.8210 +/- 0.0177, projected board 0.8217 (3 calibration pairs); leader 0.9375, below by 0.1158
 - not submitting ft-8b-32f-a100-20321a8a: dev 0.8210 does not beat best submitted 0.8288 by 0.003
 
@@ -19,6 +19,8 @@
 | 6 | Vincente | 0.8355 |
 | 7 | amirmazaheri | 0.8313 |
 | 8 | StagAI | 0.8297 |
+
+Our rank: 8
 
 ## Gap to the leader (best submission ens-79d0d049)
 
