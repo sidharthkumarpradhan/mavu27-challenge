@@ -127,7 +127,8 @@ These are the first things the first job will tell us. Check its log before trus
   - Test-weighted points lost by (source, task), blend: Hawk_UAV Temporal Grounding 3.03 (dev
     0.709), Hawk Perspective 1.24, ERA_Tra Object/Land Cover 1.07, ERA Change Detection 1.00,
     Hawk Geometric 0.98, VisDrone Object/Land Cover 0.93. 16.94 points lost in total.
-  - Hawk Temporal Grounding options sit 0.5 s apart, so frame timing is the limit there.
+  - Hawk Temporal Grounding options sit 0.5 s apart. Corrected later the same day: frame timing
+    is only part of it (see the evidence below).
   - Confidence: at max probability 0.9 or more, 96.7% right (1,013 questions). Below 0.6,
     about half right. No pipeline bug was found.
 - The analysis is `reva.analyze` (`python -m reva.cli analyze --probs NAME=PATH ...`). It reproduces
@@ -137,6 +138,29 @@ These are the first things the first job will tell us. Check its log before trus
 - Stopped by the owner: Kaggle ft-8b-4bit-16f-1ep (8B 4-bit, 16 frames, one epoch over sessions).
   It, ft-4b-32f-1ep (out of GPU memory on a T4 at 32 frames) and ft-q35-4b-16f are commented out
   of the queue (#62) and return only with an approved plan.
+
+## Evidence for the next plan (10 Oct 2026, CPU only, dev probabilities)
+
+- Board per task, 10 Oct: 0xyuan 0.9375 leads the second row (0.8802) by 0.057 and leads us on
+  10 of 11 tasks. Our largest gaps: Temporal Grounding 0.742 vs 0.913, Perspective 0.819 vs
+  0.950, Object/Land Cover 0.833 vs 0.955, Change Detection 0.774 vs 0.896. The gap is broad,
+  not one weak task.
+- Clips are short. Sampled test clips run 5 to 8 s (Hawk_UAV 5.4 to 8.0 s at 29.97 fps,
+  VisDrone 5 to 6 s, ERA 5.6 to 5.8 s). At 32 frames Qwen3-VL merges frame pairs, so the model
+  reads 16 timestamps about 0.37 s apart. The rendered prompt was checked on a real Hawk clip:
+  the timestamps are correct, so there is no pipeline bug there.
+- Hawk Temporal Grounding with answers in seconds: 334 test questions, dev 0.696 (ft-8b-32f) and
+  0.714 (ft-32b). Of the 30 ft-8b misses, 11 are one 0.5 s step off, 10 are 1 s off and 9 are
+  further. So 64 frames (0.19 s steps) could win back at most about a third of the misses. That
+  is about 0.007 to 0.01 overall.
+- Test overlap: 3,972 of 4,000 test questions ask a new question about a video seen in train.
+  The dev rows of the same kind (1,577) score zs-32b 0.765, ft-8b-32f 0.816, ft-32b 0.827.
+- The fine-tune gain does not grow with how often the video was seen in training (gain +0.064 at
+  8 to 15 train questions on the video, +0.044 at 16 or more; +0.000 when 4 or more train
+  questions share the task and video). The gain is mostly task and format learning, not memory
+  of each video. So more epochs on the same data are unlikely to give a step change. That lowers
+  the expectation for ft-8b-32f-a100-3ep toward the low end of 0.86 to 0.90. No run seen so far
+  points at the 0.947 dev that beating 0xyuan needs.
 
 ## Rebuild from scratch
 
