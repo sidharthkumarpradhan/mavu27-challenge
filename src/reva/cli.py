@@ -8,6 +8,7 @@
     autopilot --state D            one unattended cycle (what GitHub Actions runs every hour)
     submit --run ID --state D      submit one finished run by hand (the owner's decision)
     validate ZIP                   check a submission zip against test.json
+    analyze --probs NAME=PATH      error analysis of runs' dev probabilities (dev only)
 
 Codabench login comes from CODABENCH_USERNAME / CODABENCH_PASSWORD. Never pass it as an argument.
 """
@@ -181,6 +182,23 @@ def cmd_validate(a) -> int:
     return 0
 
 
+def cmd_analyze(a) -> int:
+    from reva import analyze, data
+
+    cfg = _cfg(a)
+    root = C.get(cfg, "data.root")
+    data.fetch_annotations(root, C.get(cfg, "data.hf_repo"))
+    sp = data.make_splits(root, C.get(cfg, "dev.holdout_frac"), C.get(cfg, "dev.seed"))
+    runs = {}
+    for item in a.probs:
+        name, _, path = item.partition("=")
+        if not path:
+            raise SystemExit(f"--probs takes NAME=PATH, got {item!r}")
+        runs[name] = analyze.load(path, sp["dev"])
+    print(analyze.report(sp["dev"], sp["test"], runs, C.get(cfg, "dev.min_cell")))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="reva")
     ap.add_argument("--config", default=str(C.DEFAULT))
@@ -226,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--work", default="work/submit")
     v = sub.add_parser("validate")
     v.add_argument("zip")
+    sub.add_parser("analyze").add_argument("--probs", action="append", required=True,
+                                           help="NAME=PATH to a run's dev_probs.json; repeat per run")
     a = ap.parse_args(argv)
     if a.cmd == "smoke":
         from reva import smoke
@@ -236,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return job.main(["--config", a.job_config, "--out", a.out, "--device", a.device])
     return {"fetch": cmd_fetch, "board": cmd_board, "build": cmd_build, "autopilot": cmd_autopilot, "colab": cmd_colab,
-            "submit": cmd_submit, "validate": cmd_validate}[a.cmd](a)
+            "submit": cmd_submit, "validate": cmd_validate, "analyze": cmd_analyze}[a.cmd](a)
 
 
 if __name__ == "__main__":
