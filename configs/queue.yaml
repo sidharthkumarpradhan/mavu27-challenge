@@ -49,20 +49,23 @@
 # epoch across sessions (train.span_sessions): each session trains to its end and checkpoints, the
 # autopilot archives the state and the next session resumes it, and only the last one runs
 # inference. At about 3.3 s per sample the 8B needs about 13 h of training, so 2 to 3 sessions.
-- name: ft-8b-4bit-16f-1ep
-  why: the job 4 QLoRA of Qwen3-VL-8B trained on a full epoch across sessions instead of a third of one
-  set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.load_4bit: true, train.enabled: true, infer.perms: 4,
-        train.span_sessions: true}
-- name: ft-4b-32f-1ep
-  why: LoRA of Qwen3-VL-4B on 32 frames for a full epoch across sessions. 32 frames give 16 timestamps instead of 8 for Temporal Grounding, our weakest task
-  set: {train.enabled: true, frames.n: 32, infer.perms: 4, train.span_sessions: true}
+# Held on 10 Oct 2026 (owner): no training until the local evidence says it can win. The
+# three Kaggle entries below go back only with a written hypothesis and expected dev score.
+# ft-8b-4bit-16f-1ep was stopped mid-epoch (step 712 of 1,686 saved in its run dataset).
+# - name: ft-8b-4bit-16f-1ep
+#   why: the job 4 QLoRA of Qwen3-VL-8B trained on a full epoch across sessions instead of a third of one
+#   set: {model.id: Qwen/Qwen3-VL-8B-Instruct, model.load_4bit: true, train.enabled: true, infer.perms: 4,
+#         train.span_sessions: true}
+# - name: ft-4b-32f-1ep
+#   why: LoRA of Qwen3-VL-4B on 32 frames for a full epoch across sessions. 32 frames give 16 timestamps instead of 8 for Temporal Grounding, our weakest task
+#   set: {train.enabled: true, frames.n: 32, infer.perms: 4, train.span_sessions: true}
 # Moved behind the full-epoch runs (8 Oct 2026): Qwen3.5 has linear-attention layers, so it cannot
 # pack questions and trains one question at a time, and its fp16 speed on a T4 is unmeasured. A
 # speculative arena member should not take a lane from the runs that move the board.
-- name: ft-q35-4b-16f
-  why: LoRA fine-tune of Qwen3.5-4B, 16 frames. Newer backbone with higher video benchmark scores, and a different model for the arena
-  set: {model.id: Qwen/Qwen3.5-4B, model.chat_template_kwargs: {enable_thinking: false}, train.enabled: true, infer.perms: 4,
-        train.lora_targets: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj|in_proj_qkv|in_proj_z|out_proj)'}
+# - name: ft-q35-4b-16f
+#   why: LoRA fine-tune of Qwen3.5-4B, 16 frames. Newer backbone with higher video benchmark scores, and a different model for the arena
+#   set: {model.id: Qwen/Qwen3.5-4B, model.chat_template_kwargs: {enable_thinking: false}, train.enabled: true, infer.perms: 4,
+#         train.lora_targets: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj|in_proj_qkv|in_proj_z|out_proj)'}
 # Colab Pro (8 Oct 2026, reva.colab): one A100 session at a time, run by .github/workflows/colab.yml.
 # An A100 has bf16 and 40 GB or more, so the 8B trains in full precision with 32 frames (16
 # timestamps for Temporal Grounding), where a T4 needs 4-bit and 16 frames. Sessions last about
